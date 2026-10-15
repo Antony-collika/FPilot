@@ -90,7 +90,6 @@ class SafFileRepository(
             require(!isDirectory(existing)) { "A directory already exists at the target path." }
             existing
         } else {
-            val parentId = DocumentsContract.getDocumentId(parent)
             DocumentsContract.createDocument(
                 contentResolver,
                 parent,
@@ -160,7 +159,11 @@ class SafFileRepository(
     }
 
     private fun normalizeRelativePath(path: String): String {
-        val value = path.trim().replace('\\', '/').trim('/')
+        val normalizedSeparators = path.trim().replace('\\', '/')
+        require(!normalizedSeparators.startsWith('/')) {
+            "Absolute paths are not allowed."
+        }
+        val value = normalizedSeparators.trim('/')
         if (value.isBlank()) return ""
         val segments = value.split('/')
         require(segments.none { it.isBlank() || it == "." || it == ".." }) {
