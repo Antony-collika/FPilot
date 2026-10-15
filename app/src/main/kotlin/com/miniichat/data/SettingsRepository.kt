@@ -23,7 +23,8 @@ data class AppSettings(
     val language: String = "system",          // system | en | zh
     val dynamicColor: Boolean = true,
     val themeMode: String = "system",         // system | light | dark
-    val workspaceTreeUri: String = ""
+    val workspaceTreeUri: String = "",
+    val allowWorkspaceWrites: Boolean = false
 )
 
 class SettingsRepository(private val context: Context) {
@@ -38,6 +39,7 @@ class SettingsRepository(private val context: Context) {
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val THEME = stringPreferencesKey("theme_mode")
         val WORKSPACE_TREE_URI = stringPreferencesKey("workspace_tree_uri")
+        val ALLOW_WORKSPACE_WRITES = booleanPreferencesKey("allow_workspace_writes")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -52,7 +54,8 @@ class SettingsRepository(private val context: Context) {
         language = p[Keys.LANG] ?: "system",
         dynamicColor = p[Keys.DYNAMIC] ?: true,
         themeMode = p[Keys.THEME] ?: "system",
-        workspaceTreeUri = p[Keys.WORKSPACE_TREE_URI] ?: ""
+        workspaceTreeUri = p[Keys.WORKSPACE_TREE_URI] ?: "",
+        allowWorkspaceWrites = p[Keys.ALLOW_WORKSPACE_WRITES] ?: false
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -68,6 +71,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.DYNAMIC] = next.dynamicColor
             p[Keys.THEME] = next.themeMode
             p[Keys.WORKSPACE_TREE_URI] = next.workspaceTreeUri
+            p[Keys.ALLOW_WORKSPACE_WRITES] = next.allowWorkspaceWrites
         }
     }
 }
