@@ -5,6 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.miniichat.api.ChatMessage
 import com.miniichat.api.LlmClient
+import com.miniichat.agent.AgentLoop
+import com.miniichat.files.MarkdownFileTools
+import com.miniichat.files.SafFileRepository
 import com.miniichat.data.AppSettings
 import com.miniichat.data.Assistant
 import com.miniichat.data.AssistantStore
@@ -21,7 +24,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -341,23 +343,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val flushIntervalMs = 250L
                 _streamingOverlay.value = assistantId to ""
                 try {
-                    client.chatStream(provider, effectiveSettings, model, historyForApi)
-                        .catch { e ->
-                            _error.value = e.message ?: "Request failed"
-                            val finalContent = if (builder.isEmpty()) "(error: ${e.message})" else builder.toString()
-                            appendAssistant(activeId, assistantId, finalContent)
-                        }
-                        .collect { delta ->
-                            builder.append(delta)
-                            // 1) update in-memory overlay every token (no IO)
-                            _streamingOverlay.value = assistantId to builder.toString()
-                            // 2) throttled DataStore flush
-                            val now = System.currentTimeMillis()
-                            if (now - lastFlush >= flushIntervalMs) {
-                                appendAssistant(activeId, assistantId, builder.toString())
-                                lastFlush = now
+                    if (current.workspaceTreeUri.isNotBlank()) {
+                        val treeUri = android.net.Uri.parse(current.workspaceTreeUri)
+                        val repository = SafFileRepository(
+                            getApplication<android.app.Application>().contentResolver,
+                            treeUri
+                        )
+                        val agent = AgentLoop(
+                            registry = MarkdownFileTools.registry(repository),
+                            complete = { messages, tools ->
+                                client.completeTurn(provider, effectiveSettings, model, messages, tools)
                             }
-                        }
+                        )
+                        val result = agent.run(historyForApi)
+                        builder.append(result.finalMessage.content)
+                        _streamingOverlay.value = assistantId to builder.toString()
+                        appendAssistant(activeId, assistantId, builder.toString())
+                    } else {
+                        client.chatStream(provider, effectiveSettings, model, historyForApi)
+                            .collect { delta ->
+                                builder.append(delta)
+                                // 1) update in-memory overlay every token (no IO)
+                                _streamingOverlay.value = assistantId to builder.toString()
+                                // 2) throttled DataStore flush
+                                val now = System.currentTimeMillis()
+                                if (now - lastFlush >= flushIntervalMs) {
+                                    appendAssistant(activeId, assistantId, builder.toString())
+                                    lastFlush = now
+                                }
+                            }
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    _error.value = e.message ?: "Request failed"
+                    if (builder.isEmpty()) builder.append("(error: ${e.message ?: "Request failed"})")
+                    appendAssistant(activeId, assistantId, builder.toString())
                 } finally {
                     if (builder.isNotEmpty()) {
                         appendAssistant(activeId, assistantId, builder.toString())
