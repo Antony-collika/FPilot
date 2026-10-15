@@ -96,7 +96,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (proposedLength > current.agentMaxWriteChars) return false
         if (!current.confirmWorkspaceWrites) return true
         val deferred = CompletableDeferred<Boolean>()
-        val path = arguments["path"]?.toString()?.trim('\"')?.ifBlank { "(unspecified path)" } ?: "(unspecified path)"
         fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
         fun preview(name: String): String {
             val text = value(name)
@@ -108,7 +107,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             "Replace one exact text occurrence. Target preview:" + "\n" + preview("target") + "\nReplacement preview:\n" + preview("replacement")
         }
         approvalCompletion = deferred
-        _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)
+        _pendingToolApproval.value = ToolApprovalRequest(call.name, path.ifBlank { "(unspecified path)" }, summary)
         return try {
             deferred.await()
         } finally {
