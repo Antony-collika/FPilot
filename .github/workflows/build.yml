@@ -30,22 +30,12 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
-
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
         env:
           RELEASE_STORE_PASSWORD: miniichat
           RELEASE_KEY_ALIAS: miniichat
           RELEASE_KEY_PASSWORD: miniichat
-
-      - name: Upload debug APK (CI artifact only)
-        uses: actions/upload-artifact@v4
-        with:
-          name: miniichat-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
 
       - name: Upload release APKs (CI artifact)
         uses: actions/upload-artifact@v4
