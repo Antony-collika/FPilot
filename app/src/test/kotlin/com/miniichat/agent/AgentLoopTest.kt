@@ -29,7 +29,7 @@ class AgentLoopTest {
                 "ok:${arguments["value"]?.jsonPrimitive?.contentOrNull}"
         }
         val registry = AgentToolRegistry(listOf(tool))
-        val loop = AgentLoop(registry) { messages, tools ->
+        val loop = AgentLoop(registry, complete = { messages, tools ->
             completionCount++
             assertEquals("echo", tools.single().name)
             when (completionCount) {
@@ -50,7 +50,7 @@ class AgentLoopTest {
                 }
                 else -> error("Unexpected extra model completion.")
             }
-        }
+        })
 
         val result = loop.run(listOf(ChatMessage(role = "user", content = "Run the tool.")))
 
