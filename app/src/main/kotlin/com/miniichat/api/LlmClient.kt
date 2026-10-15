@@ -28,6 +28,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -62,7 +63,9 @@ data class ChatMessage(
 data class ToolCall(
     val id: String,
     val name: String,
-    val arguments: String
+    val arguments: String,
+    /** Provider-specific metadata required to replay a tool call (e.g. Gemini thought signatures). */
+    val extraContent: JsonObject? = null
 )
 
 data class ToolDefinition(
@@ -87,13 +90,14 @@ private data class ChatChunk(
     data class ResponseMessage(
         val role: String = "assistant",
         val content: String? = "",
-        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall> = emptyList()
+        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall>? = null
     )
     @Serializable
     data class ResponseToolCall(
         val id: String,
         val type: String = "function",
-        val function: ResponseFunction
+        val function: ResponseFunction,
+        @SerialName("extra_content") val extraContent: JsonObject? = null
     )
     @Serializable
     data class ResponseFunction(val name: String, val arguments: String)
@@ -174,7 +178,7 @@ class LlmClient {
         return JsonPrimitive(v)
     }
 
-    private fun buildRequestBody(
+    internal fun buildRequestBody(
         provider: ProviderConfig,
         modelId: String,
         messages: List<ChatMessage>,
@@ -200,14 +204,7 @@ class LlmClient {
                     if (!m.toolCalls.isNullOrEmpty()) {
                         put("tool_calls", kotlinx.serialization.json.buildJsonArray {
                             for (call in m.toolCalls) {
-                                add(buildJsonObject {
-                                    put("id", call.id)
-                                    put("type", "function")
-                                    put("function", buildJsonObject {
-                                        put("name", call.name)
-                                        put("arguments", call.arguments)
-                                    })
-                                })
+                                add(serializeToolCall(call))
                             }
                         })
                     }
@@ -240,6 +237,17 @@ class LlmClient {
             }
         }
         return json.encodeToString(JsonObject.serializer(), obj)
+    }
+
+    /** Serialize a tool call without discarding provider-specific replay metadata. */
+    internal fun serializeToolCall(call: ToolCall): JsonObject = buildJsonObject {
+        put("id", call.id)
+        put("type", "function")
+        put("function", buildJsonObject {
+            put("name", call.name)
+            put("arguments", call.arguments)
+        })
+        call.extraContent?.let { put("extra_content", it) }
     }
 
     suspend fun listModels(provider: ProviderConfig): List<String> {
@@ -313,17 +321,23 @@ class LlmClient {
             text
         }
 
+        return parseCompletionResponse(response)
+    }
+
+    /** Parse a non-streaming response while retaining metadata needed by the next agent turn. */
+    internal fun parseCompletionResponse(response: String): ChatMessage {
         val parsed = json.decodeFromString(ChatResponse.serializer(), response)
         val message = parsed.choices.firstOrNull()?.message
             ?: throw RuntimeException("The model returned no message.")
         return ChatMessage(
             role = message.role,
             content = message.content.orEmpty(),
-            toolCalls = message.toolCalls.map { call ->
+            toolCalls = message.toolCalls.orEmpty().map { call ->
                 ToolCall(
                     id = call.id,
                     name = call.function.name,
-                    arguments = call.function.arguments
+                    arguments = call.function.arguments,
+                    extraContent = call.extraContent
                 )
             }.takeIf { it.isNotEmpty() }
         )
