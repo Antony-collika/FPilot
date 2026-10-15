@@ -81,7 +81,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var approvalCompletion: CompletableDeferred<Boolean>? = null
 
     suspend fun confirmToolCall(call: ToolCall, arguments: JsonObject): Boolean {
-        if (!settings.value.confirmWorkspaceWrites) return true
+        val current = settings.value
+        if (!current.allowWorkspaceWrites) return false
+        if (call.name == "create_file" && !current.allowWorkspaceCreate) return false
+        if (call.name == "edit_file" && !current.allowWorkspaceEdit) return false
+        val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val normalizedPath = path.trim().replace(92.toChar(), '/').trim('/')
+        val pathSegments = normalizedPath.split('/')
+        if (normalizedPath.isBlank() || pathSegments.any { it.isBlank() || it == "." || it == ".." } || normalizedPath.contains(":")) return false
+        val scope = current.workspaceWriteSubpath.trim().replace(92.toChar(), '/').trim('/')
+        val scopeSegments = scope.split('/')
+        if (scope.isNotBlank() && (scopeSegments.any { it.isBlank() || it == "." || it == ".." } || scope.contains(":") || !normalizedPath.startsWith("$scope/"))) return false
+        val proposedLength = if (call.name == "create_file") valueLength(arguments, "content") else valueLength(arguments, "replacement")
+        if (proposedLength > current.agentMaxWriteChars) return false
+        if (!current.confirmWorkspaceWrites) return true
         val deferred = CompletableDeferred<Boolean>()
         val path = arguments["path"]?.toString()?.trim('\"')?.ifBlank { "(unspecified path)" } ?: "(unspecified path)"
         fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -105,6 +118,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    private fun valueLength(arguments: JsonObject, key: String): Int =
+        arguments[key]?.jsonPrimitive?.contentOrNull?.length ?: 0
 
     fun respondToToolApproval(approved: Boolean) { approvalCompletion?.complete(approved) }
 
