@@ -452,6 +452,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setWorkspace(uri: String?) {
         viewModelScope.launch {
+            val previous = settings.value.workspaceTreeUri
+            if (previous.isNotBlank() && previous != uri.orEmpty()) {
+                runCatching {
+                    getApplication<android.app.Application>().contentResolver.releasePersistableUriPermission(
+                        android.net.Uri.parse(previous),
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+            }
             settingsRepo.update { it.copy(workspaceTreeUri = uri.orEmpty()) }
             _toast.value = if (uri.isNullOrBlank()) "Agent workspace cleared" else "Agent workspace selected"
         }
