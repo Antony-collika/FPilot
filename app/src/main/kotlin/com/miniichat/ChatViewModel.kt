@@ -90,9 +90,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return if (text.length > 500) text.take(500) + "…" else text
         }
         val summary = if (call.name == "create_file") {
-            "Create a new Markdown file (${value("content").length} characters). Preview:" + nl + preview("content")
+            "Create a new Markdown file (${value("content").length} characters). Preview:" + "\\n" + preview("content")
         } else {
-            "Replace one exact text occurrence. Target preview:" + nl + preview("target") + nl + "Replacement preview:" + nl + preview("replacement")
+            "Replace one exact text occurrence. Target preview:" + "\\n" + preview("target") + "\\nReplacement preview:\\n" + preview("replacement")
         }
         approvalCompletion = deferred
         _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)
