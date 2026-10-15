@@ -25,25 +25,6 @@ object MarkdownFileTools {
         )
     )
 
-    private abstract class BaseTool(
-        repositoryName: String,
-        description: String,
-        schema: String
-    ) : AgentTool {
-        protected val repository = repositoryName
-        override val definition = ToolDefinition(
-            name = repositoryName,
-            description = description,
-            parameters = Json.parseToJsonElement(schema).jsonObject
-        )
-
-        protected fun stringArg(args: JsonObject, name: String, default: String = ""): String =
-            args[name]?.jsonPrimitive?.contentOrNull ?: default
-
-        protected fun intArg(args: JsonObject, name: String, default: Int): Int =
-            args[name]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: default
-    }
-
     private class ListFilesTool(private val files: SafFileRepository) : AgentTool {
         override val definition = ToolDefinition(
             name = "list_files",
