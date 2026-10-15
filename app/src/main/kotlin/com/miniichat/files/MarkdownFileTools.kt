@@ -15,13 +15,13 @@ import kotlinx.serialization.json.jsonObject
  */
 object MarkdownFileTools {
     fun registry(repository: SafFileRepository, allowWrites: Boolean = false, allowCreate: Boolean = true,
-                 allowEdit: Boolean = true, maxWriteChars: Int = 100_000): AgentToolRegistry {
+                 allowEdit: Boolean = true, maxWriteChars: Int = 100_000, allowedWriteSubpath: String = ""): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
             ReadFileTool(repository), GetFileInfoTool(repository)
         )
-        if (allowWrites && allowCreate) tools += CreateFileTool(repository, maxWriteChars)
-        if (allowWrites && allowEdit) tools += EditFileTool(repository, maxWriteChars)
+        if (allowWrites && allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
+        if (allowWrites && allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
         return AgentToolRegistry(tools)
     }
 
@@ -158,7 +158,7 @@ object MarkdownFileTools {
         }
     }
 
-    private class CreateFileTool(private val files: SafFileRepository, private val maxWriteChars: Int) : AgentTool {
+    private class CreateFileTool(private val files: SafFileRepository, private val maxWriteChars: Int, private val allowedWriteSubpath: String) : AgentTool {
         override val definition = ToolDefinition(
             name = "create_file",
             description = "Create a new Markdown file. Refuses to overwrite an existing path.",
@@ -168,6 +168,7 @@ object MarkdownFileTools {
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
             val content = arg(arguments, "content")
+            require(isAllowedWritePath(path, allowedWriteSubpath)) { "Write denied: path is outside the configured allowed subfolder." }
             require(content.length <= maxWriteChars) { "Content exceeds the configured $maxWriteChars character write limit." }
             require(path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)) {
                 "Only Markdown files can be created by this tool."
@@ -180,7 +181,7 @@ object MarkdownFileTools {
         }
     }
 
-    private class EditFileTool(private val files: SafFileRepository, private val maxWriteChars: Int) : AgentTool {
+    private class EditFileTool(private val files: SafFileRepository, private val maxWriteChars: Int, private val allowedWriteSubpath: String) : AgentTool {
         override val definition = ToolDefinition(
             name = "edit_file",
             description = "Replace one exact text occurrence in a Markdown file. Stops if the target is missing or ambiguous.",
@@ -191,6 +192,7 @@ object MarkdownFileTools {
             val path = arg(arguments, "path")
             val target = arg(arguments, "target")
             val replacement = arg(arguments, "replacement")
+            require(isAllowedWritePath(path, allowedWriteSubpath)) { "Write denied: path is outside the configured allowed subfolder." }
             require(path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)) {
                 "Only Markdown files can be edited by this tool."
             }
@@ -234,6 +236,16 @@ object MarkdownFileTools {
         args[name]?.jsonPrimitive?.contentOrNull ?: ""
     private fun intArg(args: JsonObject, name: String, default: Int): Int =
         args[name]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: default
+    private fun isAllowedWritePath(path: String, allowedSubpath: String): Boolean {
+        val normalizedPath = path.trim().replace(92.toChar(), '/').trim('/')
+        val pathSegments = normalizedPath.split('/')
+        if (normalizedPath.isBlank() || pathSegments.any { it.isBlank() || it == "." || it == ".." } || normalizedPath.contains(":")) return false
+        val scope = allowedSubpath.trim().replace(92.toChar(), '/').trim('/')
+        if (scope.isBlank()) return true
+        val scopeSegments = scope.split('/')
+        if (scopeSegments.any { it.isBlank() || it == "." || it == ".." } || scope.contains(":")) return false
+        return normalizedPath.startsWith("$scope/")
+    }
     private fun isMarkdown(name: String): Boolean =
         name.endsWith(".md", true) || name.endsWith(".markdown", true)
 }

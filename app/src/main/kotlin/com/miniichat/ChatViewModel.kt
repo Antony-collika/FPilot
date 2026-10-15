@@ -385,7 +385,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 allowWrites = current.allowWorkspaceWrites,
                                 allowCreate = current.allowWorkspaceCreate,
                                 allowEdit = current.allowWorkspaceEdit,
-                                maxWriteChars = current.agentMaxWriteChars
+                                maxWriteChars = current.agentMaxWriteChars,
+                                allowedWriteSubpath = current.workspaceWriteSubpath
                             ),
                             complete = { messages, tools ->
                                 client.completeTurn(provider, effectiveSettings, model, messages, tools)

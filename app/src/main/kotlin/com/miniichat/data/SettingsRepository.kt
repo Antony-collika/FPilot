@@ -25,6 +25,7 @@ data class AppSettings(
     val dynamicColor: Boolean = true,
     val themeMode: String = "system",         // system | light | dark
     val workspaceTreeUri: String = "",
+    val workspaceWriteSubpath: String = "",
     val allowWorkspaceWrites: Boolean = false,
     val confirmWorkspaceWrites: Boolean = true,
     val allowWorkspaceCreate: Boolean = true,
@@ -46,6 +47,7 @@ class SettingsRepository(private val context: Context) {
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val THEME = stringPreferencesKey("theme_mode")
         val WORKSPACE_TREE_URI = stringPreferencesKey("workspace_tree_uri")
+        val WORKSPACE_WRITE_SUBPATH = stringPreferencesKey("workspace_write_subpath")
         val ALLOW_WORKSPACE_WRITES = booleanPreferencesKey("allow_workspace_writes")
         val CONFIRM_WORKSPACE_WRITES = booleanPreferencesKey("confirm_workspace_writes")
         val ALLOW_WORKSPACE_CREATE = booleanPreferencesKey("allow_workspace_create")
@@ -68,6 +70,7 @@ class SettingsRepository(private val context: Context) {
         dynamicColor = p[Keys.DYNAMIC] ?: true,
         themeMode = p[Keys.THEME] ?: "system",
         workspaceTreeUri = p[Keys.WORKSPACE_TREE_URI] ?: "",
+        workspaceWriteSubpath = p[Keys.WORKSPACE_WRITE_SUBPATH] ?: "",
         allowWorkspaceWrites = p[Keys.ALLOW_WORKSPACE_WRITES] ?: false,
         confirmWorkspaceWrites = p[Keys.CONFIRM_WORKSPACE_WRITES] ?: true,
         allowWorkspaceCreate = p[Keys.ALLOW_WORKSPACE_CREATE] ?: true,
@@ -90,6 +93,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.DYNAMIC] = next.dynamicColor
             p[Keys.THEME] = next.themeMode
             p[Keys.WORKSPACE_TREE_URI] = next.workspaceTreeUri
+            p[Keys.WORKSPACE_WRITE_SUBPATH] = next.workspaceWriteSubpath.trim().replace(92.toChar(), '/').trim('/')
             p[Keys.ALLOW_WORKSPACE_WRITES] = next.allowWorkspaceWrites
             p[Keys.CONFIRM_WORKSPACE_WRITES] = next.confirmWorkspaceWrites
             p[Keys.ALLOW_WORKSPACE_CREATE] = next.allowWorkspaceCreate

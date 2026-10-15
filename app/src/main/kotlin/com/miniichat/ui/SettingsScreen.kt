@@ -115,6 +115,20 @@ fun SettingsScreen(
                     }
                     Text("Agent file access is confined to this folder. Writes are Markdown-only.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Allowed write subfolder (optional)", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedFieldBox {
+                        BasicTextField(
+                            value = settings.workspaceWriteSubpath,
+                            onValueChange = { value -> onChange { it.copy(workspaceWriteSubpath = value) } },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current, fontSize = 14.sp, lineHeight = 20.sp),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            singleLine = true
+                        )
+                    }
+                    Text("Blank allows writes anywhere in the selected workspace. Example: notes/projects",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     ControlSwitch(
                         title = "Allow file modifications", description = "Off by default. Enables write tools below.",
