@@ -71,18 +71,18 @@ class AgentLoop(
 
     private suspend fun executeSafely(call: ToolCall): String {
         if (!registry.contains(call.name)) {
-            return """{"error":"Unknown tool: ${call.name}"}"""
+            return "Tool error: unknown tool '${call.name}'."
         }
 
         val arguments = runCatching {
             Json.parseToJsonElement(call.arguments).jsonObject
         }.getOrElse {
-            return """{"error":"Invalid JSON arguments for tool ${call.name}"}"""
+            return "Tool error: invalid JSON arguments for '${call.name}'."
         }
 
         return runCatching { registry.execute(call.name, arguments) }
             .getOrElse { error ->
-                """{"error":"Tool execution failed: ${error.message ?: error::class.simpleName}"}"""
+                "Tool error for '${call.name}': ${error.message ?: error::class.simpleName}"
             }
     }
 
