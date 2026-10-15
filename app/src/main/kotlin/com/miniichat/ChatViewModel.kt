@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
 
@@ -82,10 +84,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (!settings.value.confirmWorkspaceWrites) return true
         val deferred = CompletableDeferred<Boolean>()
         val path = arguments["path"]?.toString()?.trim('\"')?.ifBlank { "(unspecified path)" } ?: "(unspecified path)"
+        fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
+        fun preview(name: String): String {
+            val text = value(name)
+            return if (text.length > 500) text.take(500) + "…" else text
+        }
         val summary = if (call.name == "create_file") {
-            "Create a new Markdown file. Content length: ${arguments["content"]?.toString()?.length ?: 0} characters."
+            "Create a new Markdown file (${value("content").length} characters). Preview:" + nl + preview("content")
         } else {
-            "Replace one exact text occurrence. Replacement length: ${arguments["replacement"]?.toString()?.length ?: 0} characters."
+            "Replace one exact text occurrence. Target preview:" + nl + preview("target") + nl + "Replacement preview:" + nl + preview("replacement")
         }
         approvalCompletion = deferred
         _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)

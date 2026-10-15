@@ -77,7 +77,7 @@ class SettingsRepository(private val context: Context) {
         allowWorkspaceEdit = p[Keys.ALLOW_WORKSPACE_EDIT] ?: true,
         agentMaxToolRounds = (p[Keys.AGENT_MAX_TOOL_ROUNDS] ?: 8).coerceIn(1, 20),
         agentMaxToolResultChars = (p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] ?: 24_000).coerceIn(4_000, 64_000),
-        agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(1_000, 100_000)
+        agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(10_000, 100_000)
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -100,7 +100,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.ALLOW_WORKSPACE_EDIT] = next.allowWorkspaceEdit
             p[Keys.AGENT_MAX_TOOL_ROUNDS] = next.agentMaxToolRounds.coerceIn(1, 20)
             p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] = next.agentMaxToolResultChars.coerceIn(4_000, 64_000)
-            p[Keys.AGENT_MAX_WRITE_CHARS] = next.agentMaxWriteChars.coerceIn(1_000, 100_000)
+            p[Keys.AGENT_MAX_WRITE_CHARS] = next.agentMaxWriteChars.coerceIn(10_000, 100_000)
         }
     }
 }
