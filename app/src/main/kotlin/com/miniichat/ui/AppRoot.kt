@@ -14,6 +14,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,6 +39,21 @@ private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppRoot(vm: ChatViewModel) {
+    val context = LocalContext.current
+    val workspacePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            vm.setWorkspace(uri.toString())
+        }
+    }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var screen by rememberSaveable { mutableStateOf(Screen.Chat) }
@@ -141,8 +160,11 @@ fun AppRoot(vm: ChatViewModel) {
                     settings = settings,
                     providers = providers,
                     assistants = assistants,
+                    workspaceTreeUri = settings.workspaceTreeUri,
                     onBack = { screen = Screen.Chat },
                     onChange = { vm.updateSettings(it) },
+                    onChooseWorkspace = { workspacePicker.launch(null) },
+                    onClearWorkspace = { vm.setWorkspace(null) },
                     onOpenProviders = { screen = Screen.Providers },
                     onOpenAssistants = { screen = Screen.Assistants }
                 )
