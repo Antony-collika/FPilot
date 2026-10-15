@@ -37,7 +37,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a")
+            include("arm64-v8a")
             isUniversalApk = false
         }
     }
@@ -49,8 +49,8 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = if (file("release.keystore").exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -78,7 +78,7 @@ android {
 
     sourceSets["main"].java.srcDirs("src/main/kotlin")
 
-    // Output: miniichat-1.0.1-arm64-v8a-release.apk / miniichat-1.0.1-armeabi-v7a-release.apk
+    // Output: arm64-v8a release APK only
     applicationVariants.all {
         val variant = this
         outputs.all {
