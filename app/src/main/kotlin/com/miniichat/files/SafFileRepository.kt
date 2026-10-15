@@ -16,6 +16,9 @@ class SafFileRepository(
     private val contentResolver: ContentResolver,
     private val treeUri: Uri
 ) {
+    companion object {
+        private const val MAX_READ_CHARS = 2_000_000
+    }
     data class Entry(
         val name: String,
         val relativePath: String,
@@ -65,11 +68,31 @@ class SafFileRepository(
         return result
     }
 
-    suspend fun readText(path: String, charset: Charset = Charsets.UTF_8): String {
+    suspend fun readText(
+        path: String,
+        charset: Charset = Charsets.UTF_8,
+        maxChars: Int = MAX_READ_CHARS
+    ): String {
+        require(maxChars > 0) { "maxChars must be positive." }
         val uri = resolve(path)
         require(!isDirectory(uri)) { "Cannot read a directory as a file." }
-        return contentResolver.openInputStream(uri)?.bufferedReader(charset)?.use { it.readText() }
+        val input = contentResolver.openInputStream(uri)
             ?: throw IOException("The document provider could not open this file.")
+        return input.bufferedReader(charset).use { reader ->
+            val result = StringBuilder()
+            val buffer = CharArray(8_192)
+            while (true) {
+                val remaining = maxChars + 1 - result.length
+                if (remaining <= 0) break
+                val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
+                if (count < 0) break
+                result.append(buffer, 0, count)
+            }
+            if (result.length > maxChars) {
+                throw IOException("File exceeds the $maxChars character read limit.")
+            }
+            result.toString()
+        }
     }
 
     suspend fun writeText(path: String, content: String, mimeType: String = "text/markdown"): Uri {
