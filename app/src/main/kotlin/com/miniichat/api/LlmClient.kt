@@ -116,7 +116,7 @@ class LlmClient {
     private val _requestLogs = MutableStateFlow("")
     val requestLogs: StateFlow<String> = _requestLogs.asStateFlow()
     private val requestLogLock = Any()
-    private val maxRequestLogChars = 500_000
+    private val maxLogChars = 500_000
 
     fun clearRequestLogs() {
         synchronized(requestLogLock) {
@@ -124,24 +124,34 @@ class LlmClient {
         }
     }
 
-    /** Stores the exact JSON body immediately before the HTTP request is prepared. */
-    private fun recordRequestBody(bodyText: String) {
+    /** Appends a request/response entry in arrival order, trimming only the oldest log text. */
+    private fun appendLogEntry(type: String, bodyText: String) {
         val entry = buildString {
-            append("===== LLM REQUEST ")
+            append("===== ")
+            append(type)
+            append(" ")
             append(System.currentTimeMillis())
-            append(" =====\n")
+            append(" =====\\n")
             append(bodyText)
-            append("\n\n")
+            if (!bodyText.endsWith("\\n")) append("\\n")
+            append("---\\n")
         }
         synchronized(requestLogLock) {
             val combined = _requestLogs.value + entry
-            _requestLogs.value = if (combined.length <= maxRequestLogChars) {
+            _requestLogs.value = if (combined.length <= maxLogChars) {
                 combined
             } else {
-                "[Earlier request logs trimmed]\n" + combined.takeLast(maxRequestLogChars - 32)
+                "[Earlier LLM logs trimmed]\\n" + combined.takeLast(maxLogChars - 28)
             }
         }
     }
+
+    /** Records the exact JSON body before sending it to the provider. */
+    private fun recordRequestBody(bodyText: String) = appendLogEntry("REQUEST", bodyText)
+
+    /** Records the raw response body before parsing or extracting user-visible text. */
+    private fun recordReceivedBody(statusCode: Int, bodyText: String) =
+        appendLogEntry("RECEIVED (HTTP $statusCode)", bodyText)
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -296,6 +306,7 @@ class LlmClient {
             setBody(bodyText)
         }.execute { resp ->
             val text = resp.bodyAsText()
+            recordReceivedBody(resp.status.value, text)
             if (!resp.status.isSuccess()) {
                 throw RuntimeException("HTTP ${resp.status.value}: ${text.take(500)}")
             }
@@ -347,27 +358,39 @@ class LlmClient {
             }
             setBody(bodyText)
         }.execute { response ->
-            if (!response.status.isSuccess()) {
-                val errBody = runCatching { response.bodyAsText() }.getOrDefault("")
-                throw RuntimeException("HTTP ${response.status.value}: ${errBody.take(500)}")
-            }
             if (settings.stream) {
+                val rawStream = StringBuilder()
                 val channel: ByteReadChannel = response.bodyAsChannel()
-                while (true) {
-                    val line = channel.readUTF8Line() ?: break
-                    if (line.isEmpty()) continue
-                    if (!line.startsWith("data:")) continue
-                    val payload = line.removePrefix("data:").trim()
-                    if (payload == "[DONE]") break
-                    if (payload.isEmpty()) continue
-                    val chunk = runCatching {
-                        json.decodeFromString(ChatChunk.serializer(), payload)
-                    }.getOrNull() ?: continue
-                    val delta = chunk.choices.firstOrNull()?.delta?.content
-                    if (!delta.isNullOrEmpty()) emit(delta)
+                try {
+                    while (true) {
+                        val line = channel.readUTF8Line() ?: break
+                        // readUTF8Line strips separators; restore a newline so the complete
+                        // SSE event/data stream remains readable in the log.
+                        rawStream.append(line).append('\\n')
+                        if (!response.status.isSuccess()) continue
+                        if (line.isEmpty()) continue
+                        if (!line.startsWith("data:")) continue
+                        val payload = line.removePrefix("data:").trim()
+                        if (payload == "[DONE]") break
+                        if (payload.isEmpty()) continue
+                        val chunk = runCatching {
+                            json.decodeFromString(ChatChunk.serializer(), payload)
+                        }.getOrNull() ?: continue
+                        val delta = chunk.choices.firstOrNull()?.delta?.content
+                        if (!delta.isNullOrEmpty()) emit(delta)
+                    }
+                } finally {
+                    recordReceivedBody(response.status.value, rawStream.toString())
+                }
+                if (!response.status.isSuccess()) {
+                    throw RuntimeException("HTTP ${response.status.value}: ${rawStream.toString().take(500)}")
                 }
             } else {
                 val text = response.bodyAsText()
+                recordReceivedBody(response.status.value, text)
+                if (!response.status.isSuccess()) {
+                    throw RuntimeException("HTTP ${response.status.value}: ${text.take(500)}")
+                }
                 val parsed = runCatching {
                     json.decodeFromString(ChatResponse.serializer(), text)
                 }.getOrNull()

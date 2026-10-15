@@ -52,9 +52,9 @@ fun RequestLogScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
             Column(modifier = Modifier.weight(1f).padding(top = 8.dp)) {
-                Text("LLM request logs", style = MaterialTheme.typography.titleLarge)
+                Text("LLM request / response logs", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Exact JSON bodies recorded before sending requests",
+                    "Raw request bodies and received response bodies, in order",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -76,7 +76,7 @@ fun RequestLogScreen(
         }
         if (logs.isBlank()) {
             Text(
-                "No requests logged yet. Send a message to capture the next request.",
+                "No logs yet. Send a message to capture requests and received responses.",
                 modifier = Modifier.padding(top = 24.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
