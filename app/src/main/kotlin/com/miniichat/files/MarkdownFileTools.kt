@@ -34,10 +34,17 @@ object MarkdownFileTools {
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
-            return files.list(path).joinToString("\n") {
+            val entries = files.list(path)
+            val visible = entries.take(200)
+            val listing = visible.joinToString("\n") {
                 "${if (it.isDirectory) "DIR " else "FILE"} ${it.relativePath}" +
                     (it.sizeBytes?.let { size -> " (${size} bytes)" } ?: "")
-            }.ifBlank { "Directory is empty." }
+            }
+            return when {
+                entries.isEmpty() -> "Directory is empty."
+                entries.size > visible.size -> listing + "\n[truncated: showing 200 of ${entries.size} entries]"
+                else -> listing
+            }
         }
     }
 
