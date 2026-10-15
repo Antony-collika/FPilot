@@ -131,17 +131,17 @@ class LlmClient {
             append(type)
             append(" ")
             append(System.currentTimeMillis())
-            append(" =====\\n")
+            append(" =====\n")
             append(bodyText)
-            if (!bodyText.endsWith("\\n")) append("\\n")
-            append("---\\n")
+            if (!bodyText.endsWith("\n")) append("\n")
+            append("---\n")
         }
         synchronized(requestLogLock) {
             val combined = _requestLogs.value + entry
             _requestLogs.value = if (combined.length <= maxLogChars) {
                 combined
             } else {
-                "[Earlier LLM logs trimmed]\\n" + combined.takeLast(maxLogChars - 28)
+                "[Earlier LLM logs trimmed]\n" + combined.takeLast(maxLogChars - 28)
             }
         }
     }
@@ -366,7 +366,7 @@ class LlmClient {
                         val line = channel.readUTF8Line() ?: break
                         // readUTF8Line strips separators; restore a newline so the complete
                         // SSE event/data stream remains readable in the log.
-                        rawStream.append(line).append('\\n')
+                        rawStream.append(line).append('\n')
                         if (!response.status.isSuccess()) continue
                         if (line.isEmpty()) continue
                         if (!line.startsWith("data:")) continue
