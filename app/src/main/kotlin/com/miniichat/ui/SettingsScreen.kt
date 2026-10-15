@@ -58,8 +58,11 @@ fun SettingsScreen(
     settings: AppSettings,
     providers: List<ProviderConfig>,
     assistants: List<Assistant>,
+    workspaceTreeUri: String,
     onBack: () -> Unit,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
+    onChooseWorkspace: () -> Unit,
+    onClearWorkspace: () -> Unit,
     onOpenProviders: () -> Unit,
     onOpenAssistants: () -> Unit
 ) {
@@ -90,6 +93,48 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Spacer(Modifier.height(4.dp))
+
+            // Agent workspace
+            SectionCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Storage, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Agent workspace", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (workspaceTreeUri.isBlank()) "No local folder selected"
+                                else "A local folder is selected",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        if (workspaceTreeUri.isNotBlank()) {
+                            androidx.compose.material3.TextButton(onClick = onClearWorkspace) {
+                                Text("Clear")
+                            }
+                        }
+                        androidx.compose.material3.Button(onClick = onChooseWorkspace) {
+                            Text(if (workspaceTreeUri.isBlank()) "Choose folder" else "Change folder")
+                        }
+                    }
+                    Text(
+                        "FPilot can search, read, create and edit Markdown files in this folder.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             // Providers entry
             SectionCard {
