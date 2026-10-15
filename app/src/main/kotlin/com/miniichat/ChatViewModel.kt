@@ -450,6 +450,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setWorkspace(uri: String?) {
+        viewModelScope.launch {
+            settingsRepo.update { it.copy(workspaceTreeUri = uri.orEmpty()) }
+            _toast.value = if (uri.isNullOrBlank()) "Agent workspace cleared" else "Agent workspace selected"
+        }
+    }
+
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch { settingsRepo.update(transform) }
     }
