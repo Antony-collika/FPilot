@@ -118,6 +118,12 @@ class LlmClient {
     private val requestLogLock = Any()
     private val maxRequestLogChars = 500_000
 
+    fun clearRequestLogs() {
+        synchronized(requestLogLock) {
+            _requestLogs.value = ""
+        }
+    }
+
     /** Stores the exact JSON body immediately before the HTTP request is prepared. */
     private fun recordRequestBody(bodyText: String) {
         val entry = buildString {

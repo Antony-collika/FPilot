@@ -44,6 +44,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val client = LlmClient()
     val llmRequestLogs: StateFlow<String> = client.requestLogs
 
+    fun clearLlmRequestLogs() = client.clearRequestLogs()
+
     val settings: StateFlow<AppSettings> = settingsRepo.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
 

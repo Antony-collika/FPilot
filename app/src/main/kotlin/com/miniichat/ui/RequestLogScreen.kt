@@ -34,7 +34,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun RequestLogScreen(
     logs: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onClearLogs: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
     Column(
@@ -64,6 +65,13 @@ fun RequestLogScreen(
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null)
                 Text("Copy", modifier = Modifier.padding(start = 6.dp))
+            }
+            OutlinedButton(
+                onClick = onClearLogs,
+                enabled = logs.isNotBlank()
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null)
+                Text("Clear", modifier = Modifier.padding(start = 6.dp))
             }
         }
         if (logs.isBlank()) {

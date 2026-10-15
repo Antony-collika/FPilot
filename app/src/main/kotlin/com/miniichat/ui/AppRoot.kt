@@ -115,7 +115,8 @@ fun AppRoot(vm: ChatViewModel) {
             Screen.RequestLogs -> {
                 RequestLogScreen(
                     logs = llmRequestLogs,
-                    onBack = { screen = Screen.Chat }
+                    onBack = { screen = Screen.Chat },
+                    onClearLogs = { vm.clearLlmRequestLogs() }
                 )
             }
             Screen.Chat -> {
