@@ -350,7 +350,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             treeUri
                         )
                         val agent = AgentLoop(
-                            registry = MarkdownFileTools.registry(repository),
+                            registry = MarkdownFileTools.registry(repository, allowWrites = current.allowWorkspaceWrites),
                             complete = { messages, tools ->
                                 client.completeTurn(provider, effectiveSettings, model, messages, tools)
                             }
