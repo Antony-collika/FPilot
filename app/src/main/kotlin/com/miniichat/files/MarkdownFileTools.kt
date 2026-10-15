@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Initial filesystem capabilities exposed to the agent. All paths are relative
@@ -219,19 +220,17 @@ object MarkdownFileTools {
         }
     }
 
-    companion object {
-        private const val MAX_DEPTH = 8
-        private const val MAX_VISITED = 2_000
-        private const val MAX_FILE_BYTES = 1_000_000L
-        private const val MAX_LINE_CHARS = 500
-        private const val MAX_READ_CHARS = 30_000
+    private const val MAX_DEPTH = 8
+    private const val MAX_VISITED = 2_000
+    private const val MAX_FILE_BYTES = 1_000_000L
+    private const val MAX_LINE_CHARS = 500
+    private const val MAX_READ_CHARS = 30_000
 
-        private fun schema(raw: String) = Json.parseToJsonElement(raw).jsonObject
-        private fun arg(args: JsonObject, name: String): String =
-            args[name]?.jsonPrimitive?.contentOrNull ?: ""
-        private fun intArg(args: JsonObject, name: String, default: Int): Int =
-            args[name]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: default
-        private fun isMarkdown(name: String): Boolean =
-            name.endsWith(".md", true) || name.endsWith(".markdown", true)
-    }
+    private fun schema(raw: String) = Json.parseToJsonElement(raw).jsonObject
+    private fun arg(args: JsonObject, name: String): String =
+        args[name]?.jsonPrimitive?.contentOrNull ?: ""
+    private fun intArg(args: JsonObject, name: String, default: Int): Int =
+        args[name]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: default
+    private fun isMarkdown(name: String): Boolean =
+        name.endsWith(".md", true) || name.endsWith(".markdown", true)
 }
