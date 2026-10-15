@@ -194,9 +194,22 @@ object MarkdownFileTools {
                 else "Target text occurs $occurrences times; edit is ambiguous and was not applied."
             }
             val changed = original.replaceFirst(target, replacement)
-            files.writeText(path, changed)
-            val saved = files.readText(path)
-            check(saved == changed) { "Verification failed: saved content differs from requested content." }
+            try {
+                files.writeText(path, changed)
+                val saved = files.readText(path)
+                check(saved == changed) { "Verification failed: saved content differs from requested content." }
+            } catch (error: Exception) {
+                val restored = runCatching {
+                    files.writeText(path, original)
+                    files.readText(path) == original
+                }.getOrDefault(false)
+                val recovery = if (restored) " Original content was restored." else
+                    " Automatic restoration could not be confirmed; inspect the file before retrying."
+                throw IllegalStateException(
+                    "Edit failed for $path. $recovery",
+                    error
+                )
+            }
             return "Edited and verified $path."
         }
     }
