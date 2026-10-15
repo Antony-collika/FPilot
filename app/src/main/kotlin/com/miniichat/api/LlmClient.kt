@@ -177,7 +177,7 @@ class LlmClient {
         return JsonPrimitive(v)
     }
 
-    internal fun buildRequestBody(
+    private fun buildRequestBody(
         provider: ProviderConfig,
         modelId: String,
         messages: List<ChatMessage>,
