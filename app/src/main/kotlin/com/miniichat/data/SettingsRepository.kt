@@ -22,7 +22,8 @@ data class AppSettings(
     val stream: Boolean = true,
     val language: String = "system",          // system | en | zh
     val dynamicColor: Boolean = true,
-    val themeMode: String = "system"          // system | light | dark
+    val themeMode: String = "system",         // system | light | dark
+    val workspaceTreeUri: String = ""
 )
 
 class SettingsRepository(private val context: Context) {
@@ -36,6 +37,7 @@ class SettingsRepository(private val context: Context) {
         val LANG = stringPreferencesKey("language")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val THEME = stringPreferencesKey("theme_mode")
+        val WORKSPACE_TREE_URI = stringPreferencesKey("workspace_tree_uri")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -49,7 +51,8 @@ class SettingsRepository(private val context: Context) {
         stream = p[Keys.STREAM] ?: true,
         language = p[Keys.LANG] ?: "system",
         dynamicColor = p[Keys.DYNAMIC] ?: true,
-        themeMode = p[Keys.THEME] ?: "system"
+        themeMode = p[Keys.THEME] ?: "system",
+        workspaceTreeUri = p[Keys.WORKSPACE_TREE_URI] ?: ""
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -64,6 +67,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.LANG] = next.language
             p[Keys.DYNAMIC] = next.dynamicColor
             p[Keys.THEME] = next.themeMode
+            p[Keys.WORKSPACE_TREE_URI] = next.workspaceTreeUri
         }
     }
 }
