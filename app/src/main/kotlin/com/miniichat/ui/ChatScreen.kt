@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -92,7 +93,8 @@ fun ChatScreen(
     onEditMessage: (String, String) -> Unit = { _, _ -> },
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
-    onPickModel: () -> Unit
+    onPickModel: () -> Unit,
+    onOpenRequestLogs: () -> Unit
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
@@ -125,7 +127,8 @@ fun ChatScreen(
             providerLabel = activeProvider?.name,
             onMenu = onMenu,
             onPickModel = onPickModel,
-            onNew = onNew
+            onNew = onNew,
+            onOpenRequestLogs = onOpenRequestLogs
         )
 
         if (messages.isEmpty()) {
@@ -232,7 +235,8 @@ private fun ChatTopBar(
     providerLabel: String?,
     onMenu: () -> Unit,
     onPickModel: () -> Unit,
-    onNew: () -> Unit
+    onNew: () -> Unit,
+    onOpenRequestLogs: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -258,6 +262,10 @@ private fun ChatTopBar(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+            IconButton(onClick = onOpenRequestLogs) {
+                Icon(Icons.Default.Article, contentDescription = "LLM request logs",
+                    tint = MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = onNew) {
                 Icon(Icons.Default.Edit, contentDescription = "new chat",
                     tint = MaterialTheme.colorScheme.onSurface)

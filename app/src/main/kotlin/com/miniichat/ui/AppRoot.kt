@@ -34,7 +34,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants, RequestLogs }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +78,9 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Assistants) {
         screen = Screen.Settings
     }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.RequestLogs) {
+        screen = Screen.Chat
+    }
 
     val conversations by vm.conversations.collectAsState()
     val activeId by vm.activeId.collectAsState()
@@ -89,6 +92,7 @@ fun AppRoot(vm: ChatViewModel) {
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
     val pendingToolApproval by vm.pendingToolApproval.collectAsState()
+    val llmRequestLogs by vm.llmRequestLogs.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -108,6 +112,12 @@ fun AppRoot(vm: ChatViewModel) {
             .background(MaterialTheme.colorScheme.background)
     ) {
         when (screen) {
+            Screen.RequestLogs -> {
+                RequestLogScreen(
+                    logs = llmRequestLogs,
+                    onBack = { screen = Screen.Chat }
+                )
+            }
             Screen.Chat -> {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
@@ -147,6 +157,7 @@ fun AppRoot(vm: ChatViewModel) {
                         onEditMessage = { msgId, newText -> vm.editMessage(msgId, newText) },
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
+                        onOpenRequestLogs = { screen = Screen.RequestLogs },
                         onPickModel = {
                             if (providers.isEmpty()) {
                                 editingProvider = null

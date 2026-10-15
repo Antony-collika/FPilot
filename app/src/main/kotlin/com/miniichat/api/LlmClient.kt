@@ -20,6 +20,9 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -109,6 +112,30 @@ private data class ModelsResponse(val data: List<ModelEntry> = emptyList())
 
 class LlmClient {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+    private val _requestLogs = MutableStateFlow("")
+    val requestLogs: StateFlow<String> = _requestLogs.asStateFlow()
+    private val requestLogLock = Any()
+    private val maxRequestLogChars = 500_000
+
+    /** Stores the exact JSON body immediately before the HTTP request is prepared. */
+    private fun recordRequestBody(bodyText: String) {
+        val entry = buildString {
+            append("===== LLM REQUEST ")
+            append(System.currentTimeMillis())
+            append(" =====\n")
+            append(bodyText)
+            append("\n\n")
+        }
+        synchronized(requestLogLock) {
+            val combined = _requestLogs.value + entry
+            _requestLogs.value = if (combined.length <= maxRequestLogChars) {
+                combined
+            } else {
+                "[Earlier request logs trimmed]\n" + combined.takeLast(maxRequestLogChars - 32)
+            }
+        }
+    }
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -247,6 +274,7 @@ class LlmClient {
             temperature = settings.temperature,
             tools = tools
         )
+        recordRequestBody(bodyText)
         val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
             contentType(ContentType.Application.Json)
             headers {
@@ -297,6 +325,7 @@ class LlmClient {
             stream = settings.stream,
             temperature = settings.temperature
         )
+        recordRequestBody(bodyText)
 
         client.preparePost(chatEndpoint(provider.baseUrl)) {
             contentType(ContentType.Application.Json)
