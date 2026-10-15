@@ -48,10 +48,25 @@ data class ChatPart(
 data class ChatMessage(
     val role: String,
     val content: String,
-    val parts: List<ChatPart>? = null
+    val parts: List<ChatPart>? = null,
+    val toolCalls: List<ToolCall>? = null,
+    val toolCallId: String? = null,
+    val name: String? = null
 ) {
     fun isMultipart(): Boolean = !parts.isNullOrEmpty()
 }
+
+data class ToolCall(
+    val id: String,
+    val name: String,
+    val arguments: String
+)
+
+data class ToolDefinition(
+    val name: String,
+    val description: String,
+    val parameters: JsonObject
+)
 
 @Serializable
 private data class ChatChunk(
@@ -66,7 +81,19 @@ private data class ChatChunk(
     @Serializable
     data class Delta(val content: String? = null, val role: String? = null)
     @Serializable
-    data class ResponseMessage(val role: String = "assistant", val content: String = "")
+    data class ResponseMessage(
+        val role: String = "assistant",
+        val content: String? = "",
+        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall> = emptyList()
+    )
+    @Serializable
+    data class ResponseToolCall(
+        val id: String,
+        val type: String = "function",
+        val function: ResponseFunction
+    )
+    @Serializable
+    data class ResponseFunction(val name: String, val arguments: String)
 }
 
 @Serializable
@@ -109,7 +136,8 @@ class LlmClient {
         modelId: String,
         messages: List<ChatMessage>,
         stream: Boolean,
-        temperature: Float
+        temperature: Float,
+        tools: List<ToolDefinition> = emptyList()
     ): String {
         val msgsJson = kotlinx.serialization.json.buildJsonArray {
             for (m in messages) {
@@ -124,6 +152,22 @@ class LlmClient {
                     } else {
                         put("content", m.content)
                     }
+                    if (!m.toolCallId.isNullOrBlank()) put("tool_call_id", m.toolCallId)
+                    if (!m.name.isNullOrBlank()) put("name", m.name)
+                    if (!m.toolCalls.isNullOrEmpty()) {
+                        put("tool_calls", kotlinx.serialization.json.buildJsonArray {
+                            for (call in m.toolCalls) {
+                                add(buildJsonObject {
+                                    put("id", call.id)
+                                    put("type", "function")
+                                    put("function", buildJsonObject {
+                                        put("name", call.name)
+                                        put("arguments", call.arguments)
+                                    })
+                                })
+                            }
+                        })
+                    }
                 })
             }
         }
@@ -132,6 +176,21 @@ class LlmClient {
             put("stream", stream)
             put("temperature", temperature)
             put("messages", msgsJson)
+            if (tools.isNotEmpty()) {
+                put("tools", kotlinx.serialization.json.buildJsonArray {
+                    for (tool in tools) {
+                        add(buildJsonObject {
+                            put("type", "function")
+                            put("function", buildJsonObject {
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put("parameters", tool.parameters)
+                            })
+                        })
+                    }
+                })
+                put("tool_choice", "auto")
+            }
             for ((k, v) in provider.extraBody) {
                 if (k.isBlank()) continue
                 put(k, coerceToJson(v))
@@ -165,6 +224,64 @@ class LlmClient {
         }
         val ids = Regex("\"id\"\\s*:\\s*\"([^\"]+)\"").findAll(text).map { it.groupValues[1] }.toList()
         return ids.distinct().sorted()
+    }
+
+
+    /**
+     * Executes one non-streaming completion with optional OpenAI-compatible tools.
+     * This method returns tool calls as structured data; callers must validate and
+     * execute them through an application-owned registry.
+     */
+    suspend fun completeTurn(
+        provider: ProviderConfig,
+        settings: AppSettings,
+        modelId: String,
+        messages: List<ChatMessage>,
+        tools: List<ToolDefinition>
+    ): ChatMessage {
+        val bodyText = buildRequestBody(
+            provider = provider,
+            modelId = modelId,
+            messages = messages,
+            stream = false,
+            temperature = settings.temperature,
+            tools = tools
+        )
+        val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
+            contentType(ContentType.Application.Json)
+            headers {
+                if (provider.apiKey.isNotBlank()) {
+                    append(HttpHeaders.Authorization, "Bearer ${provider.apiKey}")
+                }
+                append(HttpHeaders.Accept, "application/json")
+                for ((k, v) in provider.customHeaders) {
+                    if (k.isBlank()) continue
+                    append(k, v)
+                }
+            }
+            setBody(bodyText)
+        }.execute { resp ->
+            val text = resp.bodyAsText()
+            if (!resp.status.isSuccess()) {
+                throw RuntimeException("HTTP ${resp.status.value}: ${text.take(500)}")
+            }
+            text
+        }
+
+        val parsed = json.decodeFromString(ChatResponse.serializer(), response)
+        val message = parsed.choices.firstOrNull()?.message
+            ?: throw RuntimeException("The model returned no message.")
+        return ChatMessage(
+            role = message.role,
+            content = message.content.orEmpty(),
+            toolCalls = message.toolCalls.map { call ->
+                ToolCall(
+                    id = call.id,
+                    name = call.function.name,
+                    arguments = call.function.arguments
+                )
+            }.takeIf { it.isNotEmpty() }
+        )
     }
 
     fun chatStream(
