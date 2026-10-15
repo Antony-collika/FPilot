@@ -129,10 +129,27 @@ fun SettingsScreen(
                         }
                     }
                     Text(
-                        "FPilot can search, read, create and edit Markdown files in this folder.",
+                        "FPilot can search and read Markdown files in this folder.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Allow file modifications", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Off by default. When enabled, the agent can create and edit Markdown files.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = settings.allowWorkspaceWrites,
+                            onCheckedChange = { allowed ->
+                                onChange { current -> current.copy(allowWorkspaceWrites = allowed) }
+                            }
+                        )
+                    }
                 }
             }
 
