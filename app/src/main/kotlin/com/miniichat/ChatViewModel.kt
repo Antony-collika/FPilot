@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.miniichat.api.ChatMessage
 import com.miniichat.api.LlmClient
+import com.miniichat.api.ToolCall
 import com.miniichat.agent.AgentLoop
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
@@ -19,6 +20,7 @@ import com.miniichat.data.ProviderStore
 import com.miniichat.data.SettingsRepository
 import com.miniichat.util.PromptVars
 import com.miniichat.util.newId
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,6 +29,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+
+data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -69,6 +74,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val fetchingModelsFor: StateFlow<String?> = _fetchingModelsFor.asStateFlow()
 
     private var streamingJob: Job? = null
+    private val _pendingToolApproval = MutableStateFlow<ToolApprovalRequest?>(null)
+    val pendingToolApproval: StateFlow<ToolApprovalRequest?> = _pendingToolApproval.asStateFlow()
+    private var approvalCompletion: CompletableDeferred<Boolean>? = null
+
+    suspend fun confirmToolCall(call: ToolCall, arguments: JsonObject): Boolean {
+        if (!settings.value.confirmWorkspaceWrites) return true
+        val deferred = CompletableDeferred<Boolean>()
+        val path = arguments["path"]?.toString()?.trim('\"')?.ifBlank { "(unspecified path)" } ?: "(unspecified path)"
+        val summary = if (call.name == "create_file") {
+            "Create a new Markdown file. Content length: ${arguments["content"]?.toString()?.length ?: 0} characters."
+        } else {
+            "Replace one exact text occurrence. Replacement length: ${arguments["replacement"]?.toString()?.length ?: 0} characters."
+        }
+        approvalCompletion = deferred
+        _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)
+        return try {
+            deferred.await()
+        } finally {
+            if (approvalCompletion === deferred) {
+                approvalCompletion = null
+                _pendingToolApproval.value = null
+            }
+        }
+    }
+
+    fun respondToToolApproval(approved: Boolean) { approvalCompletion?.complete(approved) }
 
     fun selectConversation(id: String?) { _activeId.value = id }
 
@@ -350,10 +381,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             treeUri
                         )
                         val agent = AgentLoop(
-                            registry = MarkdownFileTools.registry(repository, allowWrites = current.allowWorkspaceWrites),
+                            registry = MarkdownFileTools.registry(repository,
+                                allowWrites = current.allowWorkspaceWrites,
+                                allowCreate = current.allowWorkspaceCreate,
+                                allowEdit = current.allowWorkspaceEdit,
+                                maxWriteChars = current.agentMaxWriteChars
+                            ),
                             complete = { messages, tools ->
                                 client.completeTurn(provider, effectiveSettings, model, messages, tools)
-                            }
+                            },
+                            maxToolRounds = current.agentMaxToolRounds,
+                            maxToolResultChars = current.agentMaxToolResultChars,
+                            confirmToolCall = { call, arguments -> confirmToolCall(call, arguments) }
                         )
                         val result = agent.run(historyForApi)
                         builder.append(result.finalMessage.content)

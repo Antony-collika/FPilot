@@ -94,65 +94,75 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // Agent workspace
+            // Agent safety and workspace controls
+            SectionHeader("Agent Safety & Controls")
             SectionCard {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Storage, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Agent workspace", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                if (workspaceTreeUri.isBlank()) "No local folder selected"
-                                else "A local folder is selected",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("Workspace", style = MaterialTheme.typography.titleMedium)
+                            Text(if (workspaceTreeUri.isBlank()) "No local folder selected" else "A local folder is selected",
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        if (workspaceTreeUri.isNotBlank()) {
-                            androidx.compose.material3.TextButton(onClick = onClearWorkspace) {
-                                Text("Clear")
-                            }
-                        }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (workspaceTreeUri.isNotBlank()) androidx.compose.material3.TextButton(onClick = onClearWorkspace) { Text("Clear") }
                         androidx.compose.material3.Button(onClick = onChooseWorkspace) {
                             Text(if (workspaceTreeUri.isBlank()) "Choose folder" else "Change folder")
                         }
                     }
-                    Text(
-                        "FPilot can search and read Markdown files in this folder.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text("Agent file access is confined to this folder. Writes are Markdown-only.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    ControlSwitch(
+                        title = "Allow file modifications", description = "Off by default. Enables write tools below.",
+                        checked = settings.allowWorkspaceWrites,
+                        onCheckedChange = { value -> onChange { it.copy(allowWorkspaceWrites = value) } }
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Allow file modifications", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Off by default. When enabled, the agent can create and edit Markdown files.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = settings.allowWorkspaceWrites,
-                            onCheckedChange = { allowed ->
-                                onChange { current -> current.copy(allowWorkspaceWrites = allowed) }
-                            }
+                    if (settings.allowWorkspaceWrites) {
+                        ControlSwitch(
+                            title = "Confirm each file change", description = "Ask before creating or editing a file.",
+                            checked = settings.confirmWorkspaceWrites,
+                            onCheckedChange = { value -> onChange { it.copy(confirmWorkspaceWrites = value) } }
+                        )
+                        ControlSwitch(
+                            title = "Allow creating Markdown files", description = "Controls the create_file tool.",
+                            checked = settings.allowWorkspaceCreate,
+                            onCheckedChange = { value -> onChange { it.copy(allowWorkspaceCreate = value) } }
+                        )
+                        ControlSwitch(
+                            title = "Allow editing Markdown files", description = "Controls the edit_file tool.",
+                            checked = settings.allowWorkspaceEdit,
+                            onCheckedChange = { value -> onChange { it.copy(allowWorkspaceEdit = value) } }
                         )
                     }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Maximum tool rounds: ${settings.agentMaxToolRounds}", style = MaterialTheme.typography.bodyLarge)
+                    Slider(value = settings.agentMaxToolRounds.toFloat(),
+                        onValueChange = { value -> onChange { it.copy(agentMaxToolRounds = value.toInt().coerceIn(1, 20)) } },
+                        valueRange = 1f..20f, steps = 18)
+                    Text("Higher values can increase latency and API cost.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Maximum tool result: ${settings.agentMaxToolResultChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
+                    Slider(value = settings.agentMaxToolResultChars.toFloat(),
+                        onValueChange = { value ->
+                            val bounded = ((value.toInt() + 2000) / 4000 * 4000).coerceIn(4000, 64000)
+                            onChange { it.copy(agentMaxToolResultChars = bounded) }
+                        }, valueRange = 4000f..64000f, steps = 14)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Maximum file write: ${settings.agentMaxWriteChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
+                    Slider(value = settings.agentMaxWriteChars.toFloat(),
+                        onValueChange = { value ->
+                            val bounded = ((value.toInt() + 5000) / 10000 * 10000).coerceIn(10000, 100000)
+                            onChange { it.copy(agentMaxWriteChars = bounded) }
+                        }, valueRange = 10000f..100000f, steps = 8)
+                    Text("Applies to final content of newly created or edited files.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-
             // Providers entry
             SectionCard {
                 Row(
@@ -323,6 +333,18 @@ fun SettingsScreen(
             Spacer(Modifier.height(40.dp))
         }
     }
+}
+
+@Composable
+private fun ControlSwitch(title: String, description: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+    Spacer(Modifier.height(8.dp))
 }
 
 @Composable

@@ -20,7 +20,8 @@ class AgentLoop(
         tools: List<ToolDefinition>
     ) -> ChatMessage,
     private val maxToolRounds: Int = DEFAULT_MAX_TOOL_ROUNDS,
-    private val maxToolResultChars: Int = DEFAULT_MAX_TOOL_RESULT_CHARS
+    private val maxToolResultChars: Int = DEFAULT_MAX_TOOL_RESULT_CHARS,
+    private val confirmToolCall: suspend (ToolCall, JsonObject) -> Boolean = { _, _ -> true }
 ) {
     init {
         require(maxToolRounds > 0) { "maxToolRounds must be positive." }
@@ -78,6 +79,10 @@ class AgentLoop(
             Json.parseToJsonElement(call.arguments).jsonObject
         }.getOrElse {
             return "Tool error: invalid JSON arguments for '${call.name}'."
+        }
+
+        if ((call.name == "create_file" || call.name == "edit_file") && !confirmToolCall(call, arguments)) {
+            return "Tool call denied by user; no file changes were made."
         }
 
         return runCatching { registry.execute(call.name, arguments) }

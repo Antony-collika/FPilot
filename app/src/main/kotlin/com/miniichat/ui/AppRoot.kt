@@ -88,6 +88,7 @@ fun AppRoot(vm: ChatViewModel) {
     val error by vm.error.collectAsState()
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
+    val pendingToolApproval by vm.pendingToolApproval.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -226,6 +227,22 @@ fun AppRoot(vm: ChatViewModel) {
         )
     }
 
+    pendingToolApproval?.let { request ->
+        AlertDialog(
+            onDismissRequest = { vm.respondToToolApproval(false) },
+            title = { Text("Confirm file change") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Agent wants to run ${request.toolName} on:")
+                    Text(request.path, style = MaterialTheme.typography.titleSmall)
+                    Text(request.summary)
+                    Text("Only approve if this change is expected.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.respondToToolApproval(true) }) { Text("Allow") } },
+            dismissButton = { TextButton(onClick = { vm.respondToToolApproval(false) }) { Text("Deny") } }
+        )
+    }
     error?.let { msg ->
         val needsProviderFix = msg.contains("provider", ignoreCase = true)
             || msg.contains("api key", ignoreCase = true)
