@@ -123,7 +123,7 @@ fun SettingsScreen(
                 SectionHeader("Read actions")
                 SectionCard {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        ControlSwitch("All read actions", "Turn all five read tools on or off.",
+                        ControlSwitch("All read actions", when { settings.toolListFilesEnabled && settings.toolSearchFilesEnabled && settings.toolSearchContentEnabled && settings.toolReadFileEnabled && settings.toolGetFileInfoEnabled -> "All five read tools are enabled."; listOf(settings.toolListFilesEnabled, settings.toolSearchFilesEnabled, settings.toolSearchContentEnabled, settings.toolReadFileEnabled, settings.toolGetFileInfoEnabled).any { it } -> "Some read tools are enabled."; else -> "All five read tools are disabled." },
                             settings.toolListFilesEnabled && settings.toolSearchFilesEnabled && settings.toolSearchContentEnabled && settings.toolReadFileEnabled && settings.toolGetFileInfoEnabled,
                             { enabled -> onChange { it.copy(toolListFilesEnabled = enabled, toolSearchFilesEnabled = enabled, toolSearchContentEnabled = enabled, toolReadFileEnabled = enabled, toolGetFileInfoEnabled = enabled) } })
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -141,7 +141,7 @@ fun SettingsScreen(
                         ControlSwitch("Allow file modifications", "Global safety switch; required for all write tools.",
                             settings.allowWorkspaceWrites, { v -> onChange { it.copy(allowWorkspaceWrites = v) } })
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        ControlSwitch("All write actions", "Enable or disable both write tools.",
+                        ControlSwitch("All write actions", when { settings.toolCreateFileEnabled && settings.toolEditFileEnabled && settings.allowWorkspaceCreate && settings.allowWorkspaceEdit -> "Both write tools are enabled."; settings.toolCreateFileEnabled || settings.toolEditFileEnabled || settings.allowWorkspaceCreate || settings.allowWorkspaceEdit -> "Some write permissions are enabled."; else -> "Both write tools are disabled." },
                             settings.toolCreateFileEnabled && settings.toolEditFileEnabled && settings.allowWorkspaceCreate && settings.allowWorkspaceEdit,
                             { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled, allowWorkspaceCreate = enabled, allowWorkspaceEdit = enabled) } })
                         ControlSwitch("Create Markdown file", "create_file · also requires global file modifications.",
