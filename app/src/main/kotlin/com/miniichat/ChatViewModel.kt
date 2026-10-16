@@ -85,34 +85,49 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun confirmToolCall(call: ToolCall, arguments: JsonObject): Boolean {
         val current = settings.value
-        if (!current.allowWorkspaceWrites) return false
-        if (call.name == "create_file" && !current.allowWorkspaceCreate) return false
-        if (call.name == "edit_file" && !current.allowWorkspaceEdit) return false
-        val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val normalizedPath = path.trim().replace(92.toChar(), '/').trim('/')
-        val pathSegments = normalizedPath.split('/')
-        if (normalizedPath.isBlank() || pathSegments.any { it.isBlank() || it == "." || it == ".." } || normalizedPath.contains(":")) return false
-        val scope = current.workspaceWriteSubpath.trim().replace(92.toChar(), '/').trim('/')
-        val scopeSegments = scope.split('/')
-        if (scope.isNotBlank() && (scopeSegments.any { it.isBlank() || it == "." || it == ".." } || scope.contains(":") || !normalizedPath.startsWith("$scope/"))) return false
-        val proposedLength = if (call.name == "create_file") valueLength(arguments, "content") else valueLength(arguments, "replacement")
-        if (proposedLength > current.agentMaxWriteChars) return false
-        if (!current.confirmWorkspaceWrites) return true
-        val deferred = CompletableDeferred<Boolean>()
+        val isWrite = call.name == "create_file" || call.name == "edit_file"
+        if (isWrite) {
+            // These are hard safety gates, independent of the selected tool permission mode.
+            if (!current.allowWorkspaceWrites) return false
+            if (call.name == "create_file" && !current.allowWorkspaceCreate) return false
+            if (call.name == "edit_file" && !current.allowWorkspaceEdit) return false
+            val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val normalizedPath = path.trim().replace(92.toChar(), '/').trim('/')
+            val pathSegments = normalizedPath.split('/')
+            if (normalizedPath.isBlank() || pathSegments.any { it.isBlank() || it == "." || it == ".." } || normalizedPath.contains(":")) return false
+            val scope = current.workspaceWriteSubpath.trim().replace(92.toChar(), '/').trim('/')
+            val scopeSegments = scope.split('/')
+            if (scope.isNotBlank() && (scopeSegments.any { it.isBlank() || it == "." || it == ".." } || scope.contains(":") || !normalizedPath.startsWith("$scope/"))) return false
+            val proposedLength = if (call.name == "create_file") valueLength(arguments, "content") else valueLength(arguments, "replacement")
+            if (proposedLength > current.agentMaxWriteChars) return false
+        }
+
+        if (current.toolPermissionMode == "always_allow") return true
+
         fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
         fun preview(name: String): String {
-            val text = value(name)
-            return if (text.length > 500) text.take(500) + "…" else text
+            val value = value(name)
+            return if (value.length > 500) value.take(500) + "…" else value
         }
-        val summary = if (call.name == "create_file") {
-            "Create a new Markdown file (${value("content").length} characters). Preview:" + "\n" + preview("content")
-        } else {
-            "Replace one exact text occurrence. Target preview:" + "\n" + preview("target") + "\nReplacement preview:\n" + preview("replacement")
+        val path = value("path").ifBlank { value("query").ifBlank { "(no path)" } }
+        val summary = when (call.name) {
+            "create_file" -> "Create a Markdown file (${value("content").length} characters). Preview:\n${preview("content")}"
+            "edit_file" -> "Replace one exact text occurrence. Target:\n${preview("target")}\nReplacement:\n${preview("replacement")}"
+            "read_file" -> "Read file content. Path: $path"
+            "list_files" -> "List directory entries. Path: ${value("path").ifBlank { "(workspace root)" }}"
+            "search_files", "search_content" -> "Search query: ${value("query")}\nStarting path: ${value("path").ifBlank { "(workspace root)" }}"
+            "get_file_info" -> "Inspect file or directory metadata. Path: $path"
+            else -> arguments.toString().take(1_000)
         }
+        val deferred = CompletableDeferred<Boolean>()
         approvalCompletion = deferred
-        _pendingToolApproval.value = ToolApprovalRequest(call.name, path.ifBlank { "(unspecified path)" }, summary)
+        _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)
         return try {
-            deferred.await()
+            val approved = deferred.await()
+            if (approved && current.toolPermissionMode == "allow_once") {
+                settingsRepo.update { it.copy(toolPermissionMode = "always_ask") }
+            }
+            approved
         } finally {
             if (approvalCompletion === deferred) {
                 approvalCompletion = null
@@ -405,13 +420,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             getApplication<android.app.Application>().contentResolver,
                             treeUri
                         )
+                        if (current.directoryTreeEnabled) {
+                            val tree = runCatching { repository.directoryTree(current.directoryTreeDepth) }
+                                .getOrElse {
+                                    "[TREE depth=${current.directoryTreeDepth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
+                                }
+                            historyForApi.add(ChatMessage("system", tree))
+                        }
+                        val enabledTools = buildSet {
+                            if (current.toolListFilesEnabled) add("list_files")
+                            if (current.toolSearchFilesEnabled) add("search_files")
+                            if (current.toolSearchContentEnabled) add("search_content")
+                            if (current.toolReadFileEnabled) add("read_file")
+                            if (current.toolGetFileInfoEnabled) add("get_file_info")
+                            if (current.toolCreateFileEnabled) add("create_file")
+                            if (current.toolEditFileEnabled) add("edit_file")
+                        }
                         val agent = AgentLoop(
                             registry = MarkdownFileTools.registry(repository,
                                 allowWrites = current.allowWorkspaceWrites,
-                                allowCreate = current.allowWorkspaceCreate,
-                                allowEdit = current.allowWorkspaceEdit,
+                                allowCreate = current.allowWorkspaceCreate && current.toolCreateFileEnabled,
+                                allowEdit = current.allowWorkspaceEdit && current.toolEditFileEnabled,
                                 maxWriteChars = current.agentMaxWriteChars,
-                                allowedWriteSubpath = current.workspaceWriteSubpath
+                                allowedWriteSubpath = current.workspaceWriteSubpath,
+                                enabledTools = enabledTools
                             ),
                             complete = { messages, tools ->
                                 client.completeTurn(
