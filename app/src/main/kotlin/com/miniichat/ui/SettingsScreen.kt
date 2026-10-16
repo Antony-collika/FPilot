@@ -67,6 +67,7 @@ fun SettingsScreen(
     onOpenAssistants: () -> Unit
 ) {
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
+    var settingsSubScreen by rememberSaveable { mutableStateOf("main") }
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
     var temperature by rememberSaveable { mutableStateOf(settings.temperature) }
     val stream = settings.stream
@@ -84,7 +85,7 @@ fun SettingsScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
-        SettingsTopBar(title = stringResource(R.string.settings), onBack = onBack)
+        SettingsTopBar(title = when (settingsSubScreen) { "permissions" -> "Tool permissions"; "tree" -> "Directory tree"; else -> stringResource(R.string.settings) }, onBack = { if (settingsSubScreen == "main") onBack() else settingsSubScreen = "main" })
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -94,89 +95,135 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // Agent safety and workspace controls
-            SectionHeader("Agent Safety & Controls")
-            SectionCard {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Workspace", style = MaterialTheme.typography.titleMedium)
-                            Text(if (workspaceTreeUri.isBlank()) "No local folder selected" else "A local folder is selected",
-                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (workspaceTreeUri.isNotBlank()) androidx.compose.material3.TextButton(onClick = onClearWorkspace) { Text("Clear") }
-                        androidx.compose.material3.Button(onClick = onChooseWorkspace) {
-                            Text(if (workspaceTreeUri.isBlank()) "Choose folder" else "Change folder")
-                        }
-                    }
-                    Text("Agent file access is confined to this folder. Writes are Markdown-only.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Allowed write subfolder (optional)", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedFieldBox {
-                        BasicTextField(
-                            value = settings.workspaceWriteSubpath,
-                            onValueChange = { value -> onChange { it.copy(workspaceWriteSubpath = value) } },
-                            modifier = Modifier.fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current, fontSize = 14.sp, lineHeight = 20.sp),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            singleLine = true
+            if (settingsSubScreen == "permissions") {
+                SectionHeader("Permissions")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        SegmentedRow(
+                            options = listOf("always_ask" to "Always ask", "allow_once" to "Allow once", "always_allow" to "Always allow"),
+                            selectedKey = settings.toolPermissionMode,
+                            onSelect = { mode -> onChange { it.copy(toolPermissionMode = mode) } }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            when (settings.toolPermissionMode) {
+                                "allow_once" -> "Ask before running one tool call. Approval applies only to that call."
+                                "always_allow" -> "Run enabled tools automatically. Disabled tools and write protections still apply."
+                                else -> "Ask before every tool call."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text("Blank allows writes anywhere in the selected workspace. Example: notes/projects",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                    ControlSwitch(
-                        title = "Allow file modifications", description = "Off by default. Enables write tools below.",
-                        checked = settings.allowWorkspaceWrites,
-                        onCheckedChange = { value -> onChange { it.copy(allowWorkspaceWrites = value) } }
-                    )
-                    if (settings.allowWorkspaceWrites) {
-                        ControlSwitch(
-                            title = "Confirm each file change", description = "Ask before creating or editing a file.",
-                            checked = settings.confirmWorkspaceWrites,
-                            onCheckedChange = { value -> onChange { it.copy(confirmWorkspaceWrites = value) } }
-                        )
-                        ControlSwitch(
-                            title = "Allow creating Markdown files", description = "Controls the create_file tool.",
-                            checked = settings.allowWorkspaceCreate,
-                            onCheckedChange = { value -> onChange { it.copy(allowWorkspaceCreate = value) } }
-                        )
-                        ControlSwitch(
-                            title = "Allow editing Markdown files", description = "Controls the edit_file tool.",
-                            checked = settings.allowWorkspaceEdit,
-                            onCheckedChange = { value -> onChange { it.copy(allowWorkspaceEdit = value) } }
-                        )
-                    }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                    Text("Maximum tool rounds: ${settings.agentMaxToolRounds}", style = MaterialTheme.typography.bodyLarge)
-                    Slider(value = settings.agentMaxToolRounds.toFloat(),
-                        onValueChange = { value -> onChange { it.copy(agentMaxToolRounds = value.toInt().coerceIn(1, 20)) } },
-                        valueRange = 1f..20f, steps = 18)
-                    Text("Higher values can increase latency and API cost.", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Maximum tool result: ${settings.agentMaxToolResultChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
-                    Slider(value = settings.agentMaxToolResultChars.toFloat(),
-                        onValueChange = { value ->
-                            val bounded = ((value.toInt() + 2000) / 4000 * 4000).coerceIn(4000, 64000)
-                            onChange { it.copy(agentMaxToolResultChars = bounded) }
-                        }, valueRange = 4000f..64000f, steps = 14)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Maximum file write: ${settings.agentMaxWriteChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
-                    Slider(value = settings.agentMaxWriteChars.toFloat(),
-                        onValueChange = { value ->
-                            val bounded = ((value.toInt() + 5000) / 10000 * 10000).coerceIn(10000, 100000)
-                            onChange { it.copy(agentMaxWriteChars = bounded) }
-                        }, valueRange = 10000f..100000f, steps = 8)
-                    Text("Applies to final content of newly created or edited files.", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }
+
+                SectionHeader("Read actions")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        ControlSwitch("All read actions", "Turn all five read tools on or off.",
+                            settings.toolListFilesEnabled && settings.toolSearchFilesEnabled && settings.toolSearchContentEnabled && settings.toolReadFileEnabled && settings.toolGetFileInfoEnabled,
+                            { enabled -> onChange { it.copy(toolListFilesEnabled = enabled, toolSearchFilesEnabled = enabled, toolSearchContentEnabled = enabled, toolReadFileEnabled = enabled, toolGetFileInfoEnabled = enabled) } })
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        ControlSwitch("List files", "list_files", settings.toolListFilesEnabled, { v -> onChange { it.copy(toolListFilesEnabled = v) } })
+                        ControlSwitch("Search files", "search_files", settings.toolSearchFilesEnabled, { v -> onChange { it.copy(toolSearchFilesEnabled = v) } })
+                        ControlSwitch("Search file contents", "search_content", settings.toolSearchContentEnabled, { v -> onChange { it.copy(toolSearchContentEnabled = v) } })
+                        ControlSwitch("Read file", "read_file", settings.toolReadFileEnabled, { v -> onChange { it.copy(toolReadFileEnabled = v) } })
+                        ControlSwitch("Get file info", "get_file_info", settings.toolGetFileInfoEnabled, { v -> onChange { it.copy(toolGetFileInfoEnabled = v) } })
+                    }
+                }
+
+                SectionHeader("Write actions")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        ControlSwitch("Allow file modifications", "Global safety switch; required for all write tools.",
+                            settings.allowWorkspaceWrites, { v -> onChange { it.copy(allowWorkspaceWrites = v) } })
+                        if (settings.allowWorkspaceWrites) {
+                            ControlSwitch("Confirm each file change", "Legacy write confirmation preference; tool permission mode controls approvals.",
+                                settings.confirmWorkspaceWrites, { v -> onChange { it.copy(confirmWorkspaceWrites = v) } })
+                        }
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        ControlSwitch("All write actions", "Enable or disable both write tools.",
+                            settings.toolCreateFileEnabled && settings.toolEditFileEnabled,
+                            { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled) } })
+                        ControlSwitch("Create Markdown file", "create_file · also requires global file modifications.",
+                            settings.toolCreateFileEnabled && settings.allowWorkspaceCreate,
+                            { v -> onChange { it.copy(toolCreateFileEnabled = v, allowWorkspaceCreate = v) } })
+                        ControlSwitch("Edit Markdown file", "edit_file · also requires global file modifications.",
+                            settings.toolEditFileEnabled && settings.allowWorkspaceEdit,
+                            { v -> onChange { it.copy(toolEditFileEnabled = v, allowWorkspaceEdit = v) } })
+                    }
+                }
+
+                SectionHeader("Limits")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text("Maximum tool rounds: ${settings.agentMaxToolRounds}", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.agentMaxToolRounds.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxToolRounds = v.toInt().coerceIn(1, 20)) } }, valueRange = 1f..20f, steps = 18)
+                        Text("Maximum tool result: ${settings.agentMaxToolResultChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.agentMaxToolResultChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxToolResultChars = ((v.toInt() + 2000) / 4000 * 4000).coerceIn(4000, 64000)) } }, valueRange = 4000f..64000f, steps = 14)
+                        Text("Maximum file write: ${settings.agentMaxWriteChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.agentMaxWriteChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxWriteChars = ((v.toInt() + 5000) / 10000 * 10000).coerceIn(10000, 100000)) } }, valueRange = 10000f..100000f, steps = 8)
+                    }
+                }
+            } else if (settingsSubScreen == "tree") {
+                SectionHeader("Prompt context")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        ControlSwitch("Include directory tree", "Adds a stable, timestamp-free tree of the selected folder to the request.",
+                            settings.directoryTreeEnabled, { v -> onChange { it.copy(directoryTreeEnabled = v) } })
+                        Spacer(Modifier.height(8.dp))
+                        Text("Maximum scan depth: ${settings.directoryTreeDepth}", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.directoryTreeDepth.toFloat(),
+                            onValueChange = { v -> onChange { it.copy(directoryTreeDepth = v.toInt().coerceIn(1, 8)) } },
+                            valueRange = 1f..8f, steps = 6)
+                        Text("Only the selected SAF folder is scanned. A tree marked verified=false may be incomplete.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (workspaceTreeUri.isBlank()) {
+                            Text("Choose a workspace folder first.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            } else {
+                // Keep the main settings page compact; advanced agent controls live on their own pages.
+                SectionHeader("Workspace")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Workspace", style = MaterialTheme.typography.titleMedium)
+                                Text(if (workspaceTreeUri.isBlank()) "No local folder selected" else "A local folder is selected",
+                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            if (workspaceTreeUri.isNotBlank()) androidx.compose.material3.TextButton(onClick = onClearWorkspace) { Text("Clear") }
+                            androidx.compose.material3.Button(onClick = onChooseWorkspace) {
+                                Text(if (workspaceTreeUri.isBlank()) "Choose folder" else "Change folder")
+                            }
+                        }
+                        Text("File access is confined to this folder. Write actions only create or edit Markdown files.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Allowed write subfolder (optional)", style = MaterialTheme.typography.labelLarge)
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedFieldBox {
+                            BasicTextField(value = settings.workspaceWriteSubpath,
+                                onValueChange = { value -> onChange { it.copy(workspaceWriteSubpath = value) } },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current, fontSize = 14.sp, lineHeight = 20.sp),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), singleLine = true)
+                        }
+                        Text("Blank allows writes anywhere in the selected workspace. Example: notes/projects",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                SectionCard {
+                    SettingsNavigationRow("Tool permissions", "Configure access to seven file tools", Icons.Default.Storage) { settingsSubScreen = "permissions" }
+                }
+                SectionCard {
+                    SettingsNavigationRow("Directory tree", if (settings.directoryTreeEnabled) "Included in request · depth ${settings.directoryTreeDepth}" else "Optional folder context for requests", Icons.Default.Storage) { settingsSubScreen = "tree" }
+                }
             // Providers entry
             SectionCard {
                 Row(
@@ -345,7 +392,21 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(40.dp))
+            }
         }
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(title: String, description: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
