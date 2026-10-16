@@ -15,14 +15,14 @@ import kotlinx.serialization.json.jsonObject
  */
 object MarkdownFileTools {
     fun registry(repository: SafFileRepository, allowWrites: Boolean = false, allowCreate: Boolean = true,
-                 allowEdit: Boolean = true, maxWriteChars: Int = 100_000, allowedWriteSubpath: String = ""): AgentToolRegistry {
+                 allowEdit: Boolean = true, maxWriteChars: Int = 100_000, allowedWriteSubpath: String = "", enabledTools: Set<String> = ALL_TOOL_NAMES): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
             ReadFileTool(repository), GetFileInfoTool(repository)
         )
         if (allowWrites && allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
         if (allowWrites && allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
-        return AgentToolRegistry(tools)
+        return AgentToolRegistry(tools.filter { it.definition.name in enabledTools })
     }
 
     private class ListFilesTool(private val files: SafFileRepository) : AgentTool {
@@ -224,6 +224,8 @@ object MarkdownFileTools {
             return "Edited and verified $path."
         }
     }
+
+    val ALL_TOOL_NAMES = setOf("list_files", "search_files", "search_content", "read_file", "get_file_info", "create_file", "edit_file")
 
     private const val MAX_DEPTH = 8
     private const val MAX_VISITED = 2_000
