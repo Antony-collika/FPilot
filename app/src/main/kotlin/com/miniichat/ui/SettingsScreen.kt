@@ -1,5 +1,6 @@
 package com.miniichat.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,6 +72,8 @@ fun SettingsScreen(
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
     var temperature by rememberSaveable { mutableStateOf(settings.temperature) }
     val stream = settings.stream
+
+    BackHandler(enabled = settingsSubScreen != "main") { settingsSubScreen = "main" }
 
     androidx.compose.runtime.LaunchedEffect(settings.systemPrompt) {
         if (settings.systemPrompt != system) system = settings.systemPrompt
