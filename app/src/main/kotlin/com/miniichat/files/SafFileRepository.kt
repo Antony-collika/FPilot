@@ -53,7 +53,7 @@ class SafFileRepository(
             val sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
             while (cursor.moveToNext()) {
                 val id = cursor.getString(idColumn)
-                val name = cursor.getString(nameColumn) ?: continue
+                val name = cursor.getString(nameColumn) ?: throw IOException("The document provider returned an entry without a name.")
                 val mime = cursor.getString(mimeColumn)
                 val relative = listOf(path.trim('/'), name).filter { it.isNotBlank() }.joinToString("/")
                 result += Entry(
@@ -127,6 +127,7 @@ class SafFileRepository(
 
         val nodes = scan("", 0)
         val lines = mutableListOf("$rootName/")
+        if (nodes.isEmpty()) lines += "└── (empty)"
         fun render(items: List<Node>, prefix: String) {
             items.forEachIndexed { index, node ->
                 val last = index == items.lastIndex
