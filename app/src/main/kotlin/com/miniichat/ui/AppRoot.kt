@@ -242,13 +242,13 @@ fun AppRoot(vm: ChatViewModel) {
     pendingToolApproval?.let { request ->
         AlertDialog(
             onDismissRequest = { vm.respondToToolApproval(false) },
-            title = { Text("Confirm file change") },
+            title = { Text("Confirm tool call") },
             text = {
                 androidx.compose.foundation.layout.Column {
-                    Text("Agent wants to run ${request.toolName} on:")
+                    Text("Agent wants to execute the ${request.toolName} tool with:")
                     Text(request.path, style = MaterialTheme.typography.titleSmall)
                     Text(request.summary)
-                    Text("Only approve if this change is expected.")
+                    Text("Allow only if this tool call is expected. Write tools also require file modifications to be enabled.")
                 }
             },
             confirmButton = { TextButton(onClick = { vm.respondToToolApproval(true) }) { Text("Allow") } },
