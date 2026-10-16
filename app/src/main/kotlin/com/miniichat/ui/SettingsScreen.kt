@@ -142,7 +142,7 @@ fun SettingsScreen(
                             settings.allowWorkspaceWrites, { v -> onChange { it.copy(allowWorkspaceWrites = v) } })
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         ControlSwitch("All write actions", "Enable or disable both write tools.",
-                            settings.toolCreateFileEnabled && settings.toolEditFileEnabled,
+                            settings.toolCreateFileEnabled && settings.toolEditFileEnabled && settings.allowWorkspaceCreate && settings.allowWorkspaceEdit,
                             { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled, allowWorkspaceCreate = enabled, allowWorkspaceEdit = enabled) } })
                         ControlSwitch("Create Markdown file", "create_file · also requires global file modifications.",
                             settings.toolCreateFileEnabled && settings.allowWorkspaceCreate,
