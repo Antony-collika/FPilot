@@ -32,6 +32,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.net.URI
 
 @Serializable
 data class ChatPart(
@@ -177,13 +178,14 @@ class LlmClient {
         return JsonPrimitive(v)
     }
 
-    private fun buildRequestBody(
+    internal fun buildRequestBody(
         provider: ProviderConfig,
         modelId: String,
         messages: List<ChatMessage>,
         stream: Boolean,
         temperature: Float,
-        tools: List<ToolDefinition> = emptyList()
+        tools: List<ToolDefinition> = emptyList(),
+        conversationId: String? = null
     ): String {
         val msgsJson = kotlinx.serialization.json.buildJsonArray {
             for (m in messages) {
@@ -215,6 +217,9 @@ class LlmClient {
             put("stream", stream)
             put("temperature", temperature)
             put("messages", msgsJson)
+            mistralPromptCacheKey(provider, conversationId)?.let {
+                put("prompt_cache_key", it)
+            }
             if (tools.isNotEmpty()) {
                 put("tools", kotlinx.serialization.json.buildJsonArray {
                     for (tool in tools) {
@@ -236,6 +241,17 @@ class LlmClient {
             }
         }
         return json.encodeToString(JsonObject.serializer(), obj)
+    }
+
+    /**
+     * Mistral uses this stable conversation-scoped key to improve prompt-cache reuse.
+     * Do not send the parameter to other OpenAI-compatible providers.
+     */
+    internal fun mistralPromptCacheKey(provider: ProviderConfig, conversationId: String?): String? {
+        if (conversationId.isNullOrBlank()) return null
+        val host = runCatching { URI(provider.baseUrl).host }.getOrNull()
+        if (!host.equals("api.mistral.ai", ignoreCase = true)) return null
+        return "fpilot-$conversationId"
     }
 
     /** Serialize a tool call without discarding provider-specific replay metadata. */
@@ -287,7 +303,8 @@ class LlmClient {
         settings: AppSettings,
         modelId: String,
         messages: List<ChatMessage>,
-        tools: List<ToolDefinition>
+        tools: List<ToolDefinition>,
+        conversationId: String? = null
     ): ChatMessage {
         val bodyText = buildRequestBody(
             provider = provider,
@@ -295,7 +312,8 @@ class LlmClient {
             messages = messages,
             stream = false,
             temperature = settings.temperature,
-            tools = tools
+            tools = tools,
+            conversationId = conversationId
         )
         recordRequestBody(bodyText)
         val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
@@ -346,14 +364,16 @@ class LlmClient {
         provider: ProviderConfig,
         settings: AppSettings,
         modelId: String,
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        conversationId: String? = null
     ): Flow<String> = flow {
         val bodyText = buildRequestBody(
             provider = provider,
             modelId = modelId,
             messages = messages,
             stream = settings.stream,
-            temperature = settings.temperature
+            temperature = settings.temperature,
+            conversationId = conversationId
         )
         recordRequestBody(bodyText)
 
