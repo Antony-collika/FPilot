@@ -68,6 +68,86 @@ class SafFileRepository(
         return result
     }
 
+
+    /**
+     * Builds a bounded, timestamp-free directory tree for prompt context.
+     * Empty markers are emitted only after a successful listing confirms emptiness.
+     */
+    suspend fun directoryTree(maxDepth: Int, maxEntries: Int = 1_000): String {
+        val depthLimit = maxDepth.coerceIn(1, 8)
+        val rootUri = rootDocumentUri()
+        val rootName = contentResolver.query(
+            rootUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } else null
+        }
+        if (rootName == null) {
+            return "[TREE depth=$depthLimit, verified=false]\n[tree unavailable: could not determine the selected folder name]\n[/TREE]"
+        }
+
+        data class Node(
+            val name: String,
+            val directory: Boolean,
+            var children: List<Node>? = null,
+            var empty: Boolean = false,
+            var error: Boolean = false
+        )
+
+        var visited = 0
+        var complete = true
+        suspend fun scan(path: String, depth: Int): List<Node> {
+            val entries = try {
+                list(path)
+            } catch (_: Exception) {
+                complete = false
+                return listOf(Node("[scan error: listing unavailable]", false, error = true))
+            }
+            val nodes = mutableListOf<Node>()
+            for (entry in entries) {
+                if (visited >= maxEntries) {
+                    complete = false
+                    nodes += Node("[tree truncated at $maxEntries entries]", false)
+                    break
+                }
+                visited++
+                val node = Node(entry.name, entry.isDirectory)
+                if (entry.isDirectory && depth < depthLimit) {
+                    val children = scan(entry.relativePath, depth + 1)
+                    node.children = children
+                    node.empty = children.isEmpty() && complete
+                }
+                nodes += node
+            }
+            return nodes
+        }
+
+        val nodes = scan("", 0)
+        val lines = mutableListOf("$rootName/")
+        fun render(items: List<Node>, prefix: String) {
+            items.forEachIndexed { index, node ->
+                val last = index == items.lastIndex
+                val branch = if (last) "└── " else "├── "
+                val suffix = if (node.directory) "/" else ""
+                lines += prefix + branch + node.name + suffix
+                val nextPrefix = prefix + if (last) "    " else "│   "
+                if (node.error) return@forEachIndexed
+                if (node.empty) {
+                    lines += nextPrefix + "└── (empty)"
+                } else if (node.children != null && node.children!!.isNotEmpty()) {
+                    render(node.children!!, nextPrefix)
+                }
+            }
+        }
+        render(nodes, "")
+        val status = if (complete) "true" else "false"
+        return "[TREE depth=$depthLimit, verified=$status]\n" +
+            lines.joinToString("\n") + "\n[/TREE]"
+    }
+
     suspend fun readText(
         path: String,
         charset: Charset = Charsets.UTF_8,
