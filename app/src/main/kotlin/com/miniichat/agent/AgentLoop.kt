@@ -81,8 +81,8 @@ class AgentLoop(
             return "Tool error: invalid JSON arguments for '${call.name}'."
         }
 
-        if ((call.name == "create_file" || call.name == "edit_file") && !confirmToolCall(call, arguments)) {
-            return "Tool call denied by user; no file changes were made."
+        if (!confirmToolCall(call, arguments)) {
+            return "Tool call denied by user; no tool was executed."
         }
 
         return runCatching { registry.execute(call.name, arguments) }
