@@ -32,7 +32,17 @@ data class AppSettings(
     val allowWorkspaceEdit: Boolean = true,
     val agentMaxToolRounds: Int = 8,
     val agentMaxToolResultChars: Int = 24_000,
-    val agentMaxWriteChars: Int = 100_000
+    val agentMaxWriteChars: Int = 100_000,
+    val toolPermissionMode: String = "always_ask", // always_ask | allow_once | always_allow
+    val toolListFilesEnabled: Boolean = true,
+    val toolSearchFilesEnabled: Boolean = true,
+    val toolSearchContentEnabled: Boolean = true,
+    val toolReadFileEnabled: Boolean = true,
+    val toolGetFileInfoEnabled: Boolean = true,
+    val toolCreateFileEnabled: Boolean = true,
+    val toolEditFileEnabled: Boolean = true,
+    val directoryTreeEnabled: Boolean = false,
+    val directoryTreeDepth: Int = 2
 )
 
 class SettingsRepository(private val context: Context) {
@@ -55,6 +65,16 @@ class SettingsRepository(private val context: Context) {
         val AGENT_MAX_TOOL_ROUNDS = intPreferencesKey("agent_max_tool_rounds")
         val AGENT_MAX_TOOL_RESULT_CHARS = intPreferencesKey("agent_max_tool_result_chars")
         val AGENT_MAX_WRITE_CHARS = intPreferencesKey("agent_max_write_chars")
+        val TOOL_PERMISSION_MODE = stringPreferencesKey("tool_permission_mode")
+        val TOOL_LIST_FILES = booleanPreferencesKey("tool_list_files_enabled")
+        val TOOL_SEARCH_FILES = booleanPreferencesKey("tool_search_files_enabled")
+        val TOOL_SEARCH_CONTENT = booleanPreferencesKey("tool_search_content_enabled")
+        val TOOL_READ_FILE = booleanPreferencesKey("tool_read_file_enabled")
+        val TOOL_GET_FILE_INFO = booleanPreferencesKey("tool_get_file_info_enabled")
+        val TOOL_CREATE_FILE = booleanPreferencesKey("tool_create_file_enabled")
+        val TOOL_EDIT_FILE = booleanPreferencesKey("tool_edit_file_enabled")
+        val DIRECTORY_TREE_ENABLED = booleanPreferencesKey("directory_tree_enabled")
+        val DIRECTORY_TREE_DEPTH = intPreferencesKey("directory_tree_depth")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -77,7 +97,19 @@ class SettingsRepository(private val context: Context) {
         allowWorkspaceEdit = p[Keys.ALLOW_WORKSPACE_EDIT] ?: true,
         agentMaxToolRounds = (p[Keys.AGENT_MAX_TOOL_ROUNDS] ?: 8).coerceIn(1, 20),
         agentMaxToolResultChars = (p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] ?: 24_000).coerceIn(4_000, 64_000),
-        agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(10_000, 100_000)
+        agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(10_000, 100_000),
+        toolPermissionMode = (p[Keys.TOOL_PERMISSION_MODE] ?: "always_ask").takeIf {
+            it in setOf("always_ask", "allow_once", "always_allow")
+        } ?: "always_ask",
+        toolListFilesEnabled = p[Keys.TOOL_LIST_FILES] ?: true,
+        toolSearchFilesEnabled = p[Keys.TOOL_SEARCH_FILES] ?: true,
+        toolSearchContentEnabled = p[Keys.TOOL_SEARCH_CONTENT] ?: true,
+        toolReadFileEnabled = p[Keys.TOOL_READ_FILE] ?: true,
+        toolGetFileInfoEnabled = p[Keys.TOOL_GET_FILE_INFO] ?: true,
+        toolCreateFileEnabled = p[Keys.TOOL_CREATE_FILE] ?: true,
+        toolEditFileEnabled = p[Keys.TOOL_EDIT_FILE] ?: true,
+        directoryTreeEnabled = p[Keys.DIRECTORY_TREE_ENABLED] ?: false,
+        directoryTreeDepth = (p[Keys.DIRECTORY_TREE_DEPTH] ?: 2).coerceIn(1, 8)
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -101,6 +133,18 @@ class SettingsRepository(private val context: Context) {
             p[Keys.AGENT_MAX_TOOL_ROUNDS] = next.agentMaxToolRounds.coerceIn(1, 20)
             p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] = next.agentMaxToolResultChars.coerceIn(4_000, 64_000)
             p[Keys.AGENT_MAX_WRITE_CHARS] = next.agentMaxWriteChars.coerceIn(10_000, 100_000)
+            p[Keys.TOOL_PERMISSION_MODE] = next.toolPermissionMode.takeIf {
+                it in setOf("always_ask", "allow_once", "always_allow")
+            } ?: "always_ask"
+            p[Keys.TOOL_LIST_FILES] = next.toolListFilesEnabled
+            p[Keys.TOOL_SEARCH_FILES] = next.toolSearchFilesEnabled
+            p[Keys.TOOL_SEARCH_CONTENT] = next.toolSearchContentEnabled
+            p[Keys.TOOL_READ_FILE] = next.toolReadFileEnabled
+            p[Keys.TOOL_GET_FILE_INFO] = next.toolGetFileInfoEnabled
+            p[Keys.TOOL_CREATE_FILE] = next.toolCreateFileEnabled
+            p[Keys.TOOL_EDIT_FILE] = next.toolEditFileEnabled
+            p[Keys.DIRECTORY_TREE_ENABLED] = next.directoryTreeEnabled
+            p[Keys.DIRECTORY_TREE_DEPTH] = next.directoryTreeDepth.coerceIn(1, 8)
         }
     }
 }
