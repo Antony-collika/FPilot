@@ -423,7 +423,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         if (current.directoryTreeEnabled) {
                             val tree = runCatching { repository.directoryTree(current.directoryTreeDepth) }
                                 .getOrElse {
-                                    "[TREE depth=${current.directoryTreeDepth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
+                                    "[WORKSPACE PATH RULE]\n" +
+                                        "All file-tool paths are relative to the selected workspace root. The root folder name is display-only; do not prepend it to tool paths. Use an empty path for the workspace root directory.\n" +
+                                        "[/WORKSPACE PATH RULE]\n" +
+                                        "[TREE depth=${current.directoryTreeDepth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
                                 }
                             historyForApi.add(ChatMessage("system", tree))
                         }
