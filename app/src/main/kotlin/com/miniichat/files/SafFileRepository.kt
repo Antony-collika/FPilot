@@ -145,7 +145,13 @@ class SafFileRepository(
         }
         render(nodes, "")
         val status = if (complete) "true" else "false"
-        return "[TREE depth=$depthLimit, verified=$status]\n" +
+        return "[WORKSPACE PATH RULE]\n" +
+            "The selected workspace root is $rootName. Its name is shown in the tree for display only. " +
+            "All paths passed to file tools must be relative to this root. Do NOT prepend $rootName/ to a tool path. " +
+            "For example, use \"Character/A2.md\" rather than \"$rootName/Character/A2.md\". " +
+            "Use an empty path for the workspace root directory.\n" +
+            "[/WORKSPACE PATH RULE]\n" +
+            "[TREE depth=$depthLimit, verified=$status]\n" +
             lines.joinToString("\n") + "\n[/TREE]"
     }
 
@@ -216,6 +222,17 @@ class SafFileRepository(
             DocumentsContract.getTreeDocumentId(treeUri)
         )
 
+    private fun selectedRootName(): String? =
+        contentResolver.query(
+            rootDocumentUri(),
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } else null
+        }
+
     private fun resolve(path: String): Uri {
         val normalized = normalizeRelativePath(path)
         var current = rootDocumentUri()
@@ -275,6 +292,20 @@ class SafFileRepository(
         }
         require(!value.startsWith('/') && !value.contains(':')) {
             "Absolute paths and URI-like paths are not allowed."
+        }
+
+        // Models sometimes mistake the display-only tree root label for a path segment.
+        // Give them a safe correction hint instead of silently rewriting the requested path.
+        val rootName = selectedRootName()
+        if (rootName != null && segments.first() == rootName &&
+            findChild(rootDocumentUri(), rootName) == null
+        ) {
+            val suggested = segments.drop(1).joinToString("/")
+            val example = if (suggested.isBlank()) "an empty path for the workspace root" else "\"$suggested\""
+            throw IOException(
+                "Path includes the selected workspace root name '$rootName'. Tool paths are relative to the workspace root; " +
+                    "do not prepend '$rootName/'. Try $example instead."
+            )
         }
         return segments.joinToString("/")
     }
