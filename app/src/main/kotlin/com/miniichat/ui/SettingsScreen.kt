@@ -140,14 +140,10 @@ fun SettingsScreen(
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                         ControlSwitch("Allow file modifications", "Global safety switch; required for all write tools.",
                             settings.allowWorkspaceWrites, { v -> onChange { it.copy(allowWorkspaceWrites = v) } })
-                        if (settings.allowWorkspaceWrites) {
-                            ControlSwitch("Confirm each file change", "Legacy write confirmation preference; tool permission mode controls approvals.",
-                                settings.confirmWorkspaceWrites, { v -> onChange { it.copy(confirmWorkspaceWrites = v) } })
-                        }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         ControlSwitch("All write actions", "Enable or disable both write tools.",
                             settings.toolCreateFileEnabled && settings.toolEditFileEnabled,
-                            { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled) } })
+                            { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled, allowWorkspaceCreate = enabled, allowWorkspaceEdit = enabled) } })
                         ControlSwitch("Create Markdown file", "create_file · also requires global file modifications.",
                             settings.toolCreateFileEnabled && settings.allowWorkspaceCreate,
                             { v -> onChange { it.copy(toolCreateFileEnabled = v, allowWorkspaceCreate = v) } })
