@@ -115,7 +115,7 @@ class SafFileRepository(
                 }
                 visited++
                 val node = Node(entry.name, entry.isDirectory)
-                if (entry.isDirectory && depth < depthLimit) {
+                if (entry.isDirectory && depth + 1 < depthLimit) {
                     val children = scan(entry.relativePath, depth + 1)
                     node.children = children
                     node.empty = children.isEmpty() && complete
