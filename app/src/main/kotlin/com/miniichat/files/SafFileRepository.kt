@@ -222,7 +222,7 @@ class SafFileRepository(
             DocumentsContract.getTreeDocumentId(treeUri)
         )
 
-    private fun selectedRootName(): String? =
+    private fun selectedRootName(): String? = runCatching {
         contentResolver.query(
             rootDocumentUri(),
             arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
@@ -232,6 +232,7 @@ class SafFileRepository(
         )?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } else null
         }
+    }.getOrNull()
 
     private fun resolve(path: String): Uri {
         val normalized = normalizeRelativePath(path)
