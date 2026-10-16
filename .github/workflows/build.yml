@@ -2,9 +2,9 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, agent-fs ]
+    branches: [ main, agent-fs, fix/provider-tool-call-compat ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, agent-fs ]
   workflow_dispatch:
 
 jobs:

@@ -32,6 +32,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.net.URI
 
 @Serializable
 data class ChatPart(
@@ -62,7 +63,9 @@ data class ChatMessage(
 data class ToolCall(
     val id: String,
     val name: String,
-    val arguments: String
+    val arguments: String,
+    /** Provider-specific metadata required to replay a tool call (e.g. Gemini thought signatures). */
+    val extraContent: JsonObject? = null
 )
 
 data class ToolDefinition(
@@ -87,13 +90,14 @@ private data class ChatChunk(
     data class ResponseMessage(
         val role: String = "assistant",
         val content: String? = "",
-        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall> = emptyList()
+        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall>? = null
     )
     @Serializable
     data class ResponseToolCall(
         val id: String,
         val type: String = "function",
-        val function: ResponseFunction
+        val function: ResponseFunction,
+        @SerialName("extra_content") val extraContent: JsonObject? = null
     )
     @Serializable
     data class ResponseFunction(val name: String, val arguments: String)
@@ -174,13 +178,14 @@ class LlmClient {
         return JsonPrimitive(v)
     }
 
-    private fun buildRequestBody(
+    internal fun buildRequestBody(
         provider: ProviderConfig,
         modelId: String,
         messages: List<ChatMessage>,
         stream: Boolean,
         temperature: Float,
-        tools: List<ToolDefinition> = emptyList()
+        tools: List<ToolDefinition> = emptyList(),
+        conversationId: String? = null
     ): String {
         val msgsJson = kotlinx.serialization.json.buildJsonArray {
             for (m in messages) {
@@ -200,14 +205,7 @@ class LlmClient {
                     if (!m.toolCalls.isNullOrEmpty()) {
                         put("tool_calls", kotlinx.serialization.json.buildJsonArray {
                             for (call in m.toolCalls) {
-                                add(buildJsonObject {
-                                    put("id", call.id)
-                                    put("type", "function")
-                                    put("function", buildJsonObject {
-                                        put("name", call.name)
-                                        put("arguments", call.arguments)
-                                    })
-                                })
+                                add(serializeToolCall(call))
                             }
                         })
                     }
@@ -219,6 +217,9 @@ class LlmClient {
             put("stream", stream)
             put("temperature", temperature)
             put("messages", msgsJson)
+            mistralPromptCacheKey(provider, conversationId)?.let {
+                put("prompt_cache_key", it)
+            }
             if (tools.isNotEmpty()) {
                 put("tools", kotlinx.serialization.json.buildJsonArray {
                     for (tool in tools) {
@@ -240,6 +241,28 @@ class LlmClient {
             }
         }
         return json.encodeToString(JsonObject.serializer(), obj)
+    }
+
+    /**
+     * Mistral uses this stable conversation-scoped key to improve prompt-cache reuse.
+     * Do not send the parameter to other OpenAI-compatible providers.
+     */
+    internal fun mistralPromptCacheKey(provider: ProviderConfig, conversationId: String?): String? {
+        if (conversationId.isNullOrBlank()) return null
+        val host = runCatching { URI(provider.baseUrl).host }.getOrNull()
+        if (!host.equals("api.mistral.ai", ignoreCase = true)) return null
+        return "fpilot-$conversationId"
+    }
+
+    /** Serialize a tool call without discarding provider-specific replay metadata. */
+    internal fun serializeToolCall(call: ToolCall): JsonObject = buildJsonObject {
+        put("id", call.id)
+        put("type", "function")
+        put("function", buildJsonObject {
+            put("name", call.name)
+            put("arguments", call.arguments)
+        })
+        call.extraContent?.let { put("extra_content", it) }
     }
 
     suspend fun listModels(provider: ProviderConfig): List<String> {
@@ -280,7 +303,8 @@ class LlmClient {
         settings: AppSettings,
         modelId: String,
         messages: List<ChatMessage>,
-        tools: List<ToolDefinition>
+        tools: List<ToolDefinition>,
+        conversationId: String? = null
     ): ChatMessage {
         val bodyText = buildRequestBody(
             provider = provider,
@@ -288,7 +312,8 @@ class LlmClient {
             messages = messages,
             stream = false,
             temperature = settings.temperature,
-            tools = tools
+            tools = tools,
+            conversationId = conversationId
         )
         recordRequestBody(bodyText)
         val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
@@ -313,17 +338,23 @@ class LlmClient {
             text
         }
 
+        return parseCompletionResponse(response)
+    }
+
+    /** Parse a non-streaming response while retaining metadata needed by the next agent turn. */
+    internal fun parseCompletionResponse(response: String): ChatMessage {
         val parsed = json.decodeFromString(ChatResponse.serializer(), response)
         val message = parsed.choices.firstOrNull()?.message
             ?: throw RuntimeException("The model returned no message.")
         return ChatMessage(
             role = message.role,
             content = message.content.orEmpty(),
-            toolCalls = message.toolCalls.map { call ->
+            toolCalls = message.toolCalls.orEmpty().map { call ->
                 ToolCall(
                     id = call.id,
                     name = call.function.name,
-                    arguments = call.function.arguments
+                    arguments = call.function.arguments,
+                    extraContent = call.extraContent
                 )
             }.takeIf { it.isNotEmpty() }
         )
@@ -333,14 +364,16 @@ class LlmClient {
         provider: ProviderConfig,
         settings: AppSettings,
         modelId: String,
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        conversationId: String? = null
     ): Flow<String> = flow {
         val bodyText = buildRequestBody(
             provider = provider,
             modelId = modelId,
             messages = messages,
             stream = settings.stream,
-            temperature = settings.temperature
+            temperature = settings.temperature,
+            conversationId = conversationId
         )
         recordRequestBody(bodyText)
 

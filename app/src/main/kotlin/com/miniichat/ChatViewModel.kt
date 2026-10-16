@@ -414,7 +414,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 allowedWriteSubpath = current.workspaceWriteSubpath
                             ),
                             complete = { messages, tools ->
-                                client.completeTurn(provider, effectiveSettings, model, messages, tools)
+                                client.completeTurn(
+                                    provider = provider,
+                                    settings = effectiveSettings,
+                                    modelId = model,
+                                    messages = messages,
+                                    tools = tools,
+                                    conversationId = activeId
+                                )
                             },
                             maxToolRounds = current.agentMaxToolRounds,
                             maxToolResultChars = current.agentMaxToolResultChars,
@@ -425,7 +432,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         _streamingOverlay.value = assistantId to builder.toString()
                         appendAssistant(activeId, assistantId, builder.toString())
                     } else {
-                        client.chatStream(provider, effectiveSettings, model, historyForApi)
+                        client.chatStream(
+                            provider = provider,
+                            settings = effectiveSettings,
+                            modelId = model,
+                            messages = historyForApi,
+                            conversationId = activeId
+                        )
                             .collect { delta ->
                                 builder.append(delta)
                                 // 1) update in-memory overlay every token (no IO)
