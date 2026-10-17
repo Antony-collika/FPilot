@@ -372,7 +372,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 historyForApi.add(ChatMessage("system", systemPrompt))
             }
             if (skillsContent.isNotBlank()) {
-                historyForApi.add(ChatMessage("system", "[SKILLS]\\n$skillsContent\\n[/SKILLS]"))
+                historyForApi.add(ChatMessage("system", "[SKILLS]\n$skillsContent\n[/SKILLS]"))
             }
             updated.messages
                 .filter { !(it.role == "assistant" && it.content.isEmpty()) }
