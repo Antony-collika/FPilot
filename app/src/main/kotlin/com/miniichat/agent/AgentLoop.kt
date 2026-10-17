@@ -87,7 +87,12 @@ class AgentLoop(
 
         return runCatching { registry.execute(call.name, arguments) }
             .getOrElse { error ->
-                "Tool error for '${call.name}': ${error.message ?: error::class.simpleName}"
+                val path = arguments["path"]?.let { runCatching { it.toString() }.getOrNull() }
+                    ?.trim('"')
+                    ?.ifBlank { null }
+                    ?: "(not specified)"
+                "Tool error for '${call.name}' at path '$path': ${error::class.simpleName}: ${error.message ?: "no error message"}. " +
+                    "Ask the user how to proceed, stating the exact path attempted and the system error. Do not keep retrying."
             }
     }
 
