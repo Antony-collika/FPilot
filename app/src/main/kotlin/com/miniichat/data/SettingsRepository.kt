@@ -42,7 +42,15 @@ data class AppSettings(
     val toolCreateFileEnabled: Boolean = true,
     val toolEditFileEnabled: Boolean = true,
     val directoryTreeEnabled: Boolean = false,
-    val directoryTreeDepth: Int = 2
+    val directoryTreeDepth: Int = 2,
+    val systemPromptSource: String = "text", // text | file
+    val systemPromptFileUri: String = "",
+    val systemPromptFileName: String = "",
+    val skillsEnabled: Boolean = false,
+    val skillsSource: String = "text", // text | file
+    val skillsText: String = "",
+    val skillsFileUri: String = "",
+    val skillsFileName: String = ""
 )
 
 class SettingsRepository(private val context: Context) {
@@ -75,6 +83,14 @@ class SettingsRepository(private val context: Context) {
         val TOOL_EDIT_FILE = booleanPreferencesKey("tool_edit_file_enabled")
         val DIRECTORY_TREE_ENABLED = booleanPreferencesKey("directory_tree_enabled")
         val DIRECTORY_TREE_DEPTH = intPreferencesKey("directory_tree_depth")
+        val SYSTEM_PROMPT_SOURCE = stringPreferencesKey("system_prompt_source")
+        val SYSTEM_PROMPT_FILE_URI = stringPreferencesKey("system_prompt_file_uri")
+        val SYSTEM_PROMPT_FILE_NAME = stringPreferencesKey("system_prompt_file_name")
+        val SKILLS_ENABLED = booleanPreferencesKey("skills_enabled")
+        val SKILLS_SOURCE = stringPreferencesKey("skills_source")
+        val SKILLS_TEXT = stringPreferencesKey("skills_text")
+        val SKILLS_FILE_URI = stringPreferencesKey("skills_file_uri")
+        val SKILLS_FILE_NAME = stringPreferencesKey("skills_file_name")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -109,7 +125,15 @@ class SettingsRepository(private val context: Context) {
         toolCreateFileEnabled = p[Keys.TOOL_CREATE_FILE] ?: true,
         toolEditFileEnabled = p[Keys.TOOL_EDIT_FILE] ?: true,
         directoryTreeEnabled = p[Keys.DIRECTORY_TREE_ENABLED] ?: false,
-        directoryTreeDepth = (p[Keys.DIRECTORY_TREE_DEPTH] ?: 2).coerceIn(1, 8)
+        directoryTreeDepth = (p[Keys.DIRECTORY_TREE_DEPTH] ?: 2).coerceIn(1, 8),
+        systemPromptSource = (p[Keys.SYSTEM_PROMPT_SOURCE] ?: "text").takeIf { it in setOf("text", "file") } ?: "text",
+        systemPromptFileUri = p[Keys.SYSTEM_PROMPT_FILE_URI] ?: "",
+        systemPromptFileName = p[Keys.SYSTEM_PROMPT_FILE_NAME] ?: "",
+        skillsEnabled = p[Keys.SKILLS_ENABLED] ?: false,
+        skillsSource = (p[Keys.SKILLS_SOURCE] ?: "text").takeIf { it in setOf("text", "file") } ?: "text",
+        skillsText = p[Keys.SKILLS_TEXT] ?: "",
+        skillsFileUri = p[Keys.SKILLS_FILE_URI] ?: "",
+        skillsFileName = p[Keys.SKILLS_FILE_NAME] ?: ""
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -145,6 +169,14 @@ class SettingsRepository(private val context: Context) {
             p[Keys.TOOL_EDIT_FILE] = next.toolEditFileEnabled
             p[Keys.DIRECTORY_TREE_ENABLED] = next.directoryTreeEnabled
             p[Keys.DIRECTORY_TREE_DEPTH] = next.directoryTreeDepth.coerceIn(1, 8)
+            p[Keys.SYSTEM_PROMPT_SOURCE] = next.systemPromptSource.takeIf { it in setOf("text", "file") } ?: "text"
+            p[Keys.SYSTEM_PROMPT_FILE_URI] = next.systemPromptFileUri
+            p[Keys.SYSTEM_PROMPT_FILE_NAME] = next.systemPromptFileName
+            p[Keys.SKILLS_ENABLED] = next.skillsEnabled
+            p[Keys.SKILLS_SOURCE] = next.skillsSource.takeIf { it in setOf("text", "file") } ?: "text"
+            p[Keys.SKILLS_TEXT] = next.skillsText
+            p[Keys.SKILLS_FILE_URI] = next.skillsFileUri
+            p[Keys.SKILLS_FILE_NAME] = next.skillsFileName
         }
     }
 }
