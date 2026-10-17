@@ -188,7 +188,8 @@ private fun AssistantRow(
                 }
             }
             Text(
-                assistant.systemPrompt,
+                if (assistant.temperature == null) "Uses the Behavior system prompt"
+                else "Uses the Behavior system prompt · custom temperature",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2, overflow = TextOverflow.Ellipsis
@@ -220,7 +221,6 @@ fun AssistantEditor(
 ) {
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
     var avatar by remember(initial?.id) { mutableStateOf(initial?.avatar ?: "🤖") }
-    var systemPrompt by remember(initial?.id) { mutableStateOf(initial?.systemPrompt ?: "") }
     var hasTemp by remember(initial?.id) { mutableStateOf(initial?.temperature != null) }
     var temp by remember(initial?.id) { mutableStateOf(initial?.temperature ?: 0.7f) }
 
@@ -234,7 +234,6 @@ fun AssistantEditor(
                         .copy(
                             name = name.trim(),
                             avatar = avatar.trim().ifBlank { "🤖" },
-                            systemPrompt = systemPrompt,
                             temperature = if (hasTemp) temp else null
                         )
                     onSave(a)
@@ -295,31 +294,6 @@ fun AssistantEditor(
                         singleLine = true
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(stringResource(R.string.assistant_system_prompt),
-                    style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(2.dp))
-                OutlinedFieldBox {
-                    BasicTextField(
-                        value = systemPrompt,
-                        onValueChange = { systemPrompt = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = LocalTextStyle.current.copy(
-                            color = LocalContentColor.current,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        minLines = 3,
-                        maxLines = 7
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.prompt_vars_hint),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                 Spacer(Modifier.height(8.dp))
