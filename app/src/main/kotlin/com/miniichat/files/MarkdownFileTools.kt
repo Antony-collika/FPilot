@@ -14,14 +14,14 @@ import kotlinx.serialization.json.jsonObject
  * to the SAF tree URI held by SafFileRepository.
  */
 object MarkdownFileTools {
-    fun registry(repository: SafFileRepository, allowWrites: Boolean = false, allowCreate: Boolean = true,
+    fun registry(repository: SafFileRepository, allowCreate: Boolean = true,
                  allowEdit: Boolean = true, maxWriteChars: Int = 100_000, allowedWriteSubpath: String = "", enabledTools: Set<String> = ALL_TOOL_NAMES): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
             ReadFileTool(repository), GetFileInfoTool(repository)
         )
-        if (allowWrites && allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
-        if (allowWrites && allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
+        if (allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
+        if (allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
         return AgentToolRegistry(tools.filter { it.definition.name in enabledTools })
     }
 
