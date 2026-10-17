@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import android.content.Intent
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +52,36 @@ fun AppRoot(vm: ChatViewModel) {
                 )
             }
             vm.setWorkspace(uri.toString())
+        }
+    }
+
+    val systemPromptFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty().ifBlank { "Selected file" }
+            vm.updateSettings { it.copy(systemPromptFileUri = uri.toString(), systemPromptFileName = name) }
+        }
+    }
+
+    val skillsFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty().ifBlank { "Selected file" }
+            vm.updateSettings { it.copy(skillsFileUri = uri.toString(), skillsFileName = name) }
         }
     }
 
@@ -179,7 +210,9 @@ fun AppRoot(vm: ChatViewModel) {
                     onChooseWorkspace = { workspacePicker.launch(null) },
                     onClearWorkspace = { vm.setWorkspace(null) },
                     onOpenProviders = { screen = Screen.Providers },
-                    onOpenAssistants = { screen = Screen.Assistants }
+                    onOpenAssistants = { screen = Screen.Assistants },
+                    onChooseSystemPromptFile = { systemPromptFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
+                    onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) }
                 )
             }
             Screen.Assistants -> {
