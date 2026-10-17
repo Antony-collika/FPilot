@@ -15,6 +15,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,7 +37,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants, RequestLogs }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,9 +108,6 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(enabled = screen == Screen.ProviderEdit) {
         screen = Screen.Providers
     }
-    androidx.activity.compose.BackHandler(enabled = screen == Screen.Assistants) {
-        screen = Screen.Settings
-    }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.RequestLogs) {
         screen = Screen.Chat
     }
@@ -127,7 +126,28 @@ fun AppRoot(vm: ChatViewModel) {
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
-    val assistants by vm.assistants.collectAsState()
+    val workspaceName = remember(settings.workspaceTreeUri) {
+        if (settings.workspaceTreeUri.isBlank()) {
+            ""
+        } else {
+            runCatching {
+                val treeUri = Uri.parse(settings.workspaceTreeUri)
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                )
+                context.contentResolver.query(
+                    documentUri,
+                    arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+            }.getOrNull().orEmpty().ifBlank { "Selected folder" }
+        }
+    }
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(toast) {
@@ -203,26 +223,15 @@ fun AppRoot(vm: ChatViewModel) {
                 SettingsScreen(
                     settings = settings,
                     providers = providers,
-                    assistants = assistants,
                     workspaceTreeUri = settings.workspaceTreeUri,
+                    workspaceName = workspaceName,
                     onBack = { screen = Screen.Chat },
                     onChange = { vm.updateSettings(it) },
                     onChooseWorkspace = { workspacePicker.launch(null) },
                     onClearWorkspace = { vm.setWorkspace(null) },
                     onOpenProviders = { screen = Screen.Providers },
-                    onOpenAssistants = { screen = Screen.Assistants },
                     onChooseSystemPromptFile = { systemPromptFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
                     onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) }
-                )
-            }
-            Screen.Assistants -> {
-                AssistantsScreen(
-                    assistants = assistants,
-                    activeId = settings.activeAssistantId,
-                    onBack = { screen = Screen.Settings },
-                    onSelect = { vm.selectAssistant(it) },
-                    onUpsert = { vm.upsertAssistant(it) },
-                    onDelete = { vm.deleteAssistant(it) }
                 )
             }
             Screen.Providers -> {
@@ -281,7 +290,7 @@ fun AppRoot(vm: ChatViewModel) {
                     Text("Agent wants to execute the ${request.toolName} tool with:")
                     Text(request.path, style = MaterialTheme.typography.titleSmall)
                     Text(request.summary)
-                    Text("Allow only if this tool call is expected. Write tools also require file modifications to be enabled.")
+                    Text("Allow only if this tool call is expected. Write tools must be enabled in Tool permissions and stay within the allowed write scope.")
                 }
             },
             confirmButton = { TextButton(onClick = { vm.respondToToolApproval(true) }) { Text("Allow") } },
