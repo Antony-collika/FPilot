@@ -65,7 +65,9 @@ fun SettingsScreen(
     onChooseWorkspace: () -> Unit,
     onClearWorkspace: () -> Unit,
     onOpenProviders: () -> Unit,
-    onOpenAssistants: () -> Unit
+    onOpenAssistants: () -> Unit,
+    onChooseSystemPromptFile: () -> Unit,
+    onChooseSkillsFile: () -> Unit
 ) {
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
     var settingsSubScreen by rememberSaveable { mutableStateOf("main") }
@@ -88,7 +90,7 @@ fun SettingsScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
-        SettingsTopBar(title = when (settingsSubScreen) { "permissions" -> "Tool permissions"; "tree" -> "Directory tree"; else -> stringResource(R.string.settings) }, onBack = { if (settingsSubScreen == "main") onBack() else settingsSubScreen = "main" })
+        SettingsTopBar(title = when (settingsSubScreen) { "permissions" -> "Tool permissions"; "tree" -> "Directory tree"; "behavior" -> "Behavior"; else -> stringResource(R.string.settings) }, onBack = { if (settingsSubScreen == "main") onBack() else settingsSubScreen = "main" })
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -162,6 +164,143 @@ fun SettingsScreen(
                         Slider(value = settings.agentMaxToolResultChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxToolResultChars = ((v.toInt() + 2000) / 4000 * 4000).coerceIn(4000, 64000)) } }, valueRange = 4000f..64000f, steps = 14)
                         Text("Maximum file write: ${settings.agentMaxWriteChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
                         Slider(value = settings.agentMaxWriteChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxWriteChars = ((v.toInt() + 5000) / 10000 * 10000).coerceIn(10000, 100000)) } }, valueRange = 10000f..100000f, steps = 8)
+                    }
+                }
+            } else if (settingsSubScreen == "behavior") {
+                SectionHeader("System prompt")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text("Choose one source for the system prompt.", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SourceChoiceRow("Text input", "text", settings.systemPromptSource) {
+                            onChange { it.copy(systemPromptSource = "text") }
+                        }
+                        SourceChoiceRow("External file", "file", settings.systemPromptSource) {
+                            onChange { it.copy(systemPromptSource = "file") }
+                        }
+                        if (settings.systemPromptSource == "text") {
+                            Spacer(Modifier.height(6.dp))
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = system,
+                                onValueChange = {
+                                    system = it
+                                    onChange { current -> current.copy(systemPrompt = it) }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = LocalTextStyle.current.copy(
+                                    color = LocalContentColor.current,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                minLines = 3,
+                                maxLines = 10
+                            )
+                            HorizontalDivider(Modifier.padding(top = 4.dp))
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                settings.systemPromptFileName.ifBlank { "No system prompt file selected" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            androidx.compose.material3.TextButton(onClick = onChooseSystemPromptFile) {
+                                Text(if (settings.systemPromptFileUri.isBlank()) "Choose file" else "Change file")
+                            }
+                            Text("Reads UTF-8 text from the selected file when sending a request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                SectionHeader("Skills")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Include Skills", style = MaterialTheme.typography.bodyLarge)
+                                Text("Adds extra task instructions to each request when enabled.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = settings.skillsEnabled,
+                                onCheckedChange = { enabled -> onChange { it.copy(skillsEnabled = enabled) } }
+                            )
+                        }
+                        if (settings.skillsEnabled) {
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Choose one Skills source.", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SourceChoiceRow("Text input", "text", settings.skillsSource) {
+                                onChange { it.copy(skillsSource = "text") }
+                            }
+                            SourceChoiceRow("External file", "file", settings.skillsSource) {
+                                onChange { it.copy(skillsSource = "file") }
+                            }
+                            if (settings.skillsSource == "text") {
+                                Spacer(Modifier.height(6.dp))
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = settings.skillsText,
+                                    onValueChange = { value -> onChange { it.copy(skillsText = value) } },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textStyle = LocalTextStyle.current.copy(
+                                        color = LocalContentColor.current,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    minLines = 3,
+                                    maxLines = 10
+                                )
+                                HorizontalDivider(Modifier.padding(top = 4.dp))
+                            } else {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    settings.skillsFileName.ifBlank { "No Skills file selected" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                androidx.compose.material3.TextButton(onClick = onChooseSkillsFile) {
+                                    Text(if (settings.skillsFileUri.isBlank()) "Choose file" else "Change file")
+                                }
+                                Text("Reads UTF-8 text from the selected file when sending a request.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+
+                SectionHeader("Generation")
+                SectionCard {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Text(
+                            "${stringResource(R.string.setting_temperature)}: ${"%.2f".format(temperature)}",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Slider(
+                            value = temperature,
+                            onValueChange = {
+                                temperature = it
+                                onChange { current -> current.copy(temperature = it) }
+                            },
+                            valueRange = 0f..2f,
+                            steps = 19
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.setting_stream), style = MaterialTheme.typography.bodyLarge)
+                                Text("Server-Sent Events", style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = stream,
+                                onCheckedChange = { enabled -> onChange { it.copy(stream = enabled) } }
+                            )
+                        }
                     }
                 }
             } else if (settingsSubScreen == "tree") {
@@ -275,62 +414,14 @@ fun SettingsScreen(
                 }
             }
 
-            // Behavior
+            // Behavior entry
             SectionHeader(stringResource(R.string.section_behavior))
             SectionCard {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text(stringResource(R.string.setting_system),
-                        style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedFieldBox {
-                        BasicTextField(
-                            value = system,
-                            onValueChange = {
-                                system = it
-                                onChange { s -> s.copy(systemPrompt = it) }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(
-                                color = LocalContentColor.current,
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            minLines = 2,
-                            maxLines = 5
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "${stringResource(R.string.setting_temperature)}: ${"%.2f".format(temperature)}",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    Slider(
-                        value = temperature,
-                        onValueChange = {
-                            temperature = it
-                            onChange { s -> s.copy(temperature = it) }
-                        },
-                        valueRange = 0f..2f,
-                        steps = 19
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.setting_stream),
-                                style = MaterialTheme.typography.bodyLarge)
-                            Text("Server-Sent Events",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = stream,
-                            onCheckedChange = {
-                                onChange { s -> s.copy(stream = it) }
-                            }
-                        )
-                    }
-                }
+                SettingsNavigationRow(
+                    "Behavior",
+                    "System prompt, Skills, temperature and streaming",
+                    Icons.Default.Storage
+                ) { settingsSubScreen = "behavior" }
             }
 
             // Appearance
@@ -406,6 +497,29 @@ private fun SettingsNavigationRow(title: String, description: String, icon: andr
             Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SourceChoiceRow(
+    label: String,
+    key: String,
+    selectedKey: String,
+    onSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.material3.RadioButton(
+            selected = selectedKey == key,
+            onClick = onSelect
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
