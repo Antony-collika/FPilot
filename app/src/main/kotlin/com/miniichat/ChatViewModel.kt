@@ -106,11 +106,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (proposedLength > current.agentMaxWriteChars) return false
         }
 
-        if (current.toolPermissionMode == "always_allow") return true
         if (current.toolPermissionMode != "allow_once") {
-            // A mode change to Always ask must revoke any temporary grant for this run.
             permissionSession.allowOnceGranted = false
-        } else if (permissionSession.allowOnceGranted) {
+        }
+        if (current.toolPermissionMode == "always_allow") return true
+        if (current.toolPermissionMode == "allow_once" && permissionSession.allowOnceGranted) {
             return true
         }
 
