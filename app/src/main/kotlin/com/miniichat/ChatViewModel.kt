@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -312,16 +314,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         val temperature = assistant?.temperature ?: current.temperature
 
-        val systemPromptRaw = assistant?.systemPrompt?.takeIf { it.isNotBlank() }
-            ?: current.systemPrompt
-        val systemPrompt = PromptVars.render(
-            template = systemPromptRaw,
-            model = model,
-            provider = provider.name,
-            assistant = assistant?.name ?: ""
-        )
-
         viewModelScope.launch {
+            val systemPromptRaw = try {
+                if (current.systemPromptSource == "file") {
+                    readPromptFile(current.systemPromptFileUri, "System prompt")
+                } else {
+                    current.systemPrompt
+                }
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Could not read the system prompt source."
+                return@launch
+            }
+            val skillsContent = if (current.skillsEnabled) {
+                try {
+                    if (current.skillsSource == "file") {
+                        readPromptFile(current.skillsFileUri, "Skills")
+                    } else {
+                        current.skillsText
+                    }
+                } catch (e: Exception) {
+                    _error.value = e.message ?: "Could not read the Skills source."
+                    return@launch
+                }
+            } else ""
+            val systemPrompt = PromptVars.render(
+                template = systemPromptRaw,
+                model = model,
+                provider = provider.name,
+                assistant = assistant?.name ?: ""
+            )
+
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
             val existing = store.snapshot().firstOrNull { it.id == activeId }
             val baseTitle = trimmed.take(30).replace("\n", " ")
@@ -348,6 +370,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val historyForApi = mutableListOf<ChatMessage>()
             if (systemPrompt.isNotBlank()) {
                 historyForApi.add(ChatMessage("system", systemPrompt))
+            }
+            if (skillsContent.isNotBlank()) {
+                historyForApi.add(ChatMessage("system", "[SKILLS]\\n$skillsContent\\n[/SKILLS]"))
             }
             updated.messages
                 .filter { !(it.role == "assistant" && it.content.isEmpty()) }
@@ -428,7 +453,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                         "[/WORKSPACE PATH RULE]\n" +
                                         "[TREE depth=${current.directoryTreeDepth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
                                 }
-                            historyForApi.add(ChatMessage("system", tree))
+                            val treeIndex = if (systemPrompt.isNotBlank()) 1 else 0
+                            historyForApi.add(treeIndex.coerceAtMost(historyForApi.size), ChatMessage("system", tree))
                         }
                         val enabledTools = buildSet {
                             if (current.toolListFilesEnabled) add("list_files")
@@ -561,6 +587,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
         }
+    }
+
+    private suspend fun readPromptFile(uri: String, label: String): String = withContext(Dispatchers.IO) {
+        if (uri.isBlank()) {
+            throw IllegalStateException("$label is set to use an external file, but no file has been selected.")
+        }
+        val resolver = getApplication<Application>().contentResolver
+        val text = resolver.openInputStream(android.net.Uri.parse(uri))
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            ?: throw IllegalStateException("Could not open the selected $label file. Please select it again.")
+        if (text.isBlank()) {
+            throw IllegalStateException("The selected $label file is empty.")
+        }
+        text
     }
 
     fun setWorkspace(uri: String?) {
