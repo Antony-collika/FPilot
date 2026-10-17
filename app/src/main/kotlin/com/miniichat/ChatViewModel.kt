@@ -10,8 +10,6 @@ import com.miniichat.agent.AgentLoop
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.data.AppSettings
-import com.miniichat.data.Assistant
-import com.miniichat.data.AssistantStore
 import com.miniichat.data.Conversation
 import com.miniichat.data.ConversationStore
 import com.miniichat.data.Message
@@ -42,7 +40,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ConversationStore(app)
     val settingsRepo = SettingsRepository(app)
     val providerStore = ProviderStore(app)
-    val assistantStore = AssistantStore(app)
     private val client = LlmClient()
     val llmRequestLogs: StateFlow<String> = client.requestLogs
 
@@ -52,9 +49,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
 
     val providers: StateFlow<List<ProviderConfig>> = providerStore.providersFlow
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    val assistants: StateFlow<List<Assistant>> = assistantStore.assistantsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val conversations: StateFlow<List<Conversation>> = store.conversationsFlow
@@ -90,7 +84,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val isWrite = call.name == "create_file" || call.name == "edit_file"
         if (isWrite) {
             // These are hard safety gates, independent of the selected tool permission mode.
-            if (!current.allowWorkspaceWrites) return false
             if (call.name == "create_file" && !current.allowWorkspaceCreate) return false
             if (call.name == "edit_file" && !current.allowWorkspaceEdit) return false
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -174,34 +167,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun activeProvider(): ProviderConfig? =
         providers.value.firstOrNull { it.id == settings.value.activeProviderId }
 
-    fun activeAssistant(): Assistant? =
-        assistants.value.firstOrNull { it.id == settings.value.activeAssistantId }
-
     fun selectModel(providerId: String, model: String) {
         viewModelScope.launch {
             settingsRepo.update { it.copy(activeProviderId = providerId, activeModel = model) }
-        }
-    }
-
-    fun selectAssistant(id: String) {
-        viewModelScope.launch {
-            settingsRepo.update { it.copy(activeAssistantId = id) }
-        }
-    }
-
-    fun upsertAssistant(a: Assistant) {
-        viewModelScope.launch { assistantStore.upsert(a) }
-    }
-
-    fun deleteAssistant(id: String) {
-        viewModelScope.launch {
-            assistantStore.delete(id)
-            if (settings.value.activeAssistantId == id) {
-                val remaining = assistantStore.snapshot()
-                settingsRepo.update {
-                    it.copy(activeAssistantId = remaining.firstOrNull()?.id ?: "default")
-                }
-            }
         }
     }
 
@@ -286,19 +254,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (trimmed.isEmpty() && attachments.isEmpty()) return
 
         val current = settings.value
-        val assistant = activeAssistant()
-
-        // Resolve effective provider and model: assistant override > settings active
-        val provider = assistant?.preferredProviderId
-            ?.let { id -> providers.value.firstOrNull { it.id == id } }
-            ?: activeProvider()
+        val provider = activeProvider()
         if (provider == null) {
             _error.value = "No provider configured."
             return
         }
 
-        val model = assistant?.preferredModel?.takeIf { it.isNotBlank() }
-            ?: current.activeModel
+        val model = current.activeModel
         if (model.isBlank()) {
             _error.value = "No model selected."
             return
@@ -312,7 +274,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val temperature = assistant?.temperature ?: current.temperature
+        val temperature = current.temperature
 
         viewModelScope.launch {
             val systemPromptRaw = try {
@@ -341,7 +303,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 template = systemPromptRaw,
                 model = model,
                 provider = provider.name,
-                assistant = assistant?.name ?: ""
+                assistant = ""
             )
 
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
@@ -431,7 +393,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             _isStreaming.value = true
             val builder = StringBuilder()
 
-            // Use settings.copy with assistant temperature override
+            // Use the Behavior temperature selected in Settings.
             val effectiveSettings = current.copy(temperature = temperature)
 
             streamingJob = launch {
@@ -467,7 +429,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         val agent = AgentLoop(
                             registry = MarkdownFileTools.registry(repository,
-                                allowWrites = current.allowWorkspaceWrites,
                                 allowCreate = current.allowWorkspaceCreate && current.toolCreateFileEnabled,
                                 allowEdit = current.allowWorkspaceEdit && current.toolEditFileEnabled,
                                 maxWriteChars = current.agentMaxWriteChars,
