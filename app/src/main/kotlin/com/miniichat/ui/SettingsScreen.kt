@@ -113,7 +113,7 @@ fun SettingsScreen(
                         Spacer(Modifier.height(8.dp))
                         Text(
                             when (settings.toolPermissionMode) {
-                                "allow_once" -> "Ask before running one tool call. Approval applies only to that call."
+                                "allow_once" -> "Ask once per agent run. Approval covers the remaining tool calls in that run only."
                                 "always_allow" -> "Run enabled tools automatically. Disabled tools and write limits still apply."
                                 else -> "Ask before every tool call."
                             },
