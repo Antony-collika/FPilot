@@ -17,7 +17,6 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 data class AppSettings(
     val activeProviderId: String = "",
     val activeModel: String = "",
-    val activeAssistantId: String = "default",
     val systemPrompt: String = "You are a helpful assistant.",
     val temperature: Float = 0.7f,
     val stream: Boolean = true,
@@ -56,7 +55,6 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val PROVIDER = stringPreferencesKey("active_provider_id")
         val MODEL = stringPreferencesKey("active_model")
-        val ASSISTANT = stringPreferencesKey("active_assistant_id")
         val SYSTEM = stringPreferencesKey("system_prompt")
         val TEMP = floatPreferencesKey("temperature")
         val STREAM = booleanPreferencesKey("stream")
@@ -96,7 +94,6 @@ class SettingsRepository(private val context: Context) {
     private fun read(p: Preferences) = AppSettings(
         activeProviderId = p[Keys.PROVIDER] ?: "",
         activeModel = p[Keys.MODEL] ?: "",
-        activeAssistantId = p[Keys.ASSISTANT] ?: "default",
         systemPrompt = p[Keys.SYSTEM] ?: "You are a helpful assistant.",
         temperature = p[Keys.TEMP] ?: 0.7f,
         stream = p[Keys.STREAM] ?: true,
@@ -138,7 +135,6 @@ class SettingsRepository(private val context: Context) {
             val next = transform(read(p))
             p[Keys.PROVIDER] = next.activeProviderId
             p[Keys.MODEL] = next.activeModel
-            p[Keys.ASSISTANT] = next.activeAssistantId
             p[Keys.SYSTEM] = next.systemPrompt
             p[Keys.TEMP] = next.temperature
             p[Keys.STREAM] = next.stream
