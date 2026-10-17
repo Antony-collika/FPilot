@@ -25,7 +25,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,21 +50,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.AppSettings
-import com.miniichat.data.Assistant
 import com.miniichat.data.ProviderConfig
 
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
     providers: List<ProviderConfig>,
-    assistants: List<Assistant>,
+    workspaceName: String,
     workspaceTreeUri: String,
     onBack: () -> Unit,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onChooseWorkspace: () -> Unit,
     onClearWorkspace: () -> Unit,
     onOpenProviders: () -> Unit,
-    onOpenAssistants: () -> Unit,
     onChooseSystemPromptFile: () -> Unit,
     onChooseSkillsFile: () -> Unit
 ) {
@@ -117,7 +114,7 @@ fun SettingsScreen(
                         Text(
                             when (settings.toolPermissionMode) {
                                 "allow_once" -> "Ask before running one tool call. Approval applies only to that call."
-                                "always_allow" -> "Run enabled tools automatically. Disabled tools and write protections still apply."
+                                "always_allow" -> "Run enabled tools automatically. Disabled tools and write limits still apply."
                                 else -> "Ask before every tool call."
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -144,16 +141,13 @@ fun SettingsScreen(
                 SectionHeader("Write actions")
                 SectionCard {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        ControlSwitch("Allow file modifications", "Global safety switch; required for all write tools.",
-                            settings.allowWorkspaceWrites, { v -> onChange { it.copy(allowWorkspaceWrites = v) } })
-                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         ControlSwitch("All write actions", when { settings.toolCreateFileEnabled && settings.toolEditFileEnabled && settings.allowWorkspaceCreate && settings.allowWorkspaceEdit -> "Both write tools are enabled."; settings.toolCreateFileEnabled || settings.toolEditFileEnabled || settings.allowWorkspaceCreate || settings.allowWorkspaceEdit -> "Some write permissions are enabled."; else -> "Both write tools are disabled." },
                             settings.toolCreateFileEnabled && settings.toolEditFileEnabled && settings.allowWorkspaceCreate && settings.allowWorkspaceEdit,
                             { enabled -> onChange { it.copy(toolCreateFileEnabled = enabled, toolEditFileEnabled = enabled, allowWorkspaceCreate = enabled, allowWorkspaceEdit = enabled) } })
-                        ControlSwitch("Create Markdown file", "create_file · also requires global file modifications.",
+                        ControlSwitch("Create Markdown file", "create_file",
                             settings.toolCreateFileEnabled && settings.allowWorkspaceCreate,
                             { v -> onChange { it.copy(toolCreateFileEnabled = v, allowWorkspaceCreate = v) } })
-                        ControlSwitch("Edit Markdown file", "edit_file · also requires global file modifications.",
+                        ControlSwitch("Edit Markdown file", "edit_file",
                             settings.toolEditFileEnabled && settings.allowWorkspaceEdit,
                             { v -> onChange { it.copy(toolEditFileEnabled = v, allowWorkspaceEdit = v) } })
                     }
@@ -338,7 +332,7 @@ fun SettingsScreen(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Workspace", style = MaterialTheme.typography.titleMedium)
-                                Text(if (workspaceTreeUri.isBlank()) "No local folder selected" else "A local folder is selected",
+                                Text(if (workspaceTreeUri.isBlank()) "No selection" else workspaceName,
                                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -369,6 +363,16 @@ fun SettingsScreen(
                 SectionCard {
                     SettingsNavigationRow("Directory tree", if (settings.directoryTreeEnabled) "Included in request · depth ${settings.directoryTreeDepth}" else "Optional folder context for requests", Icons.Default.Storage) { settingsSubScreen = "tree" }
                 }
+            // Behavior entry
+            SectionHeader(stringResource(R.string.section_behavior))
+            SectionCard {
+                SettingsNavigationRow(
+                    "Behavior",
+                    "System prompt, Skills, temperature and streaming",
+                    Icons.Default.Storage
+                ) { settingsSubScreen = "behavior" }
+            }
+
             // Providers entry
             SectionCard {
                 Row(
@@ -391,44 +395,6 @@ fun SettingsScreen(
                     Icon(Icons.Default.ChevronRight, contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }
-
-            // Assistants entry
-            SectionCard {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onOpenAssistants)
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Person, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface)
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.assistants),
-                            style = MaterialTheme.typography.titleMedium)
-                        val active = assistants.firstOrNull { it.id == settings.activeAssistantId }
-                        Text(
-                            active?.let { "${it.avatar}  ${it.name}" }
-                                ?: "${assistants.size} assistants",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(Icons.Default.ChevronRight, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            // Behavior entry
-            SectionHeader(stringResource(R.string.section_behavior))
-            SectionCard {
-                SettingsNavigationRow(
-                    "Behavior",
-                    "System prompt, Skills, temperature and streaming",
-                    Icons.Default.Storage
-                ) { settingsSubScreen = "behavior" }
             }
 
             // Appearance
