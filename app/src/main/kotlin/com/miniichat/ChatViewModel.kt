@@ -35,6 +35,11 @@ import kotlinx.serialization.json.jsonPrimitive
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
 
+/** Temporary authorization scoped to one AgentLoop.run() invocation. */
+private class ToolPermissionSession {
+    var allowOnceGranted: Boolean = false
+}
+
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ConversationStore(app)
@@ -79,7 +84,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val pendingToolApproval: StateFlow<ToolApprovalRequest?> = _pendingToolApproval.asStateFlow()
     private var approvalCompletion: CompletableDeferred<Boolean>? = null
 
-    suspend fun confirmToolCall(call: ToolCall, arguments: JsonObject): Boolean {
+    private suspend fun confirmToolCall(
+        call: ToolCall,
+        arguments: JsonObject,
+        permissionSession: ToolPermissionSession
+    ): Boolean {
         val current = settings.value
         val isWrite = call.name == "create_file" || call.name == "edit_file"
         if (isWrite) {
@@ -98,6 +107,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         if (current.toolPermissionMode == "always_allow") return true
+        if (current.toolPermissionMode != "allow_once") {
+            // A mode change to Always ask must revoke any temporary grant for this run.
+            permissionSession.allowOnceGranted = false
+        } else if (permissionSession.allowOnceGranted) {
+            return true
+        }
 
         fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
         fun preview(name: String): String {
@@ -119,8 +134,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _pendingToolApproval.value = ToolApprovalRequest(call.name, path, summary)
         return try {
             val approved = deferred.await()
-            if (approved && current.toolPermissionMode == "allow_once") {
-                settingsRepo.update { it.copy(toolPermissionMode = "always_ask") }
+            // Approval authorizes the remaining tool calls only in this Agent run.
+            // Never persist the temporary grant into AppSettings.
+            if (approved && settings.value.toolPermissionMode == "allow_once") {
+                permissionSession.allowOnceGranted = true
             }
             approved
         } finally {
@@ -427,6 +444,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             if (current.toolCreateFileEnabled) add("create_file")
                             if (current.toolEditFileEnabled) add("edit_file")
                         }
+                        // Each agent.run() receives an isolated, non-persistent permission session.
+                        val permissionSession = ToolPermissionSession()
                         val agent = AgentLoop(
                             registry = MarkdownFileTools.registry(repository,
                                 allowCreate = current.allowWorkspaceCreate && current.toolCreateFileEnabled,
@@ -447,7 +466,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             },
                             maxToolRounds = current.agentMaxToolRounds,
                             maxToolResultChars = current.agentMaxToolResultChars,
-                            confirmToolCall = { call, arguments -> confirmToolCall(call, arguments) }
+                            confirmToolCall = { call, arguments ->
+                                confirmToolCall(call, arguments, permissionSession)
+                            }
                         )
                         val result = agent.run(historyForApi)
                         builder.append(result.finalMessage.content)
