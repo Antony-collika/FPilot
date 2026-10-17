@@ -72,6 +72,7 @@ fun SettingsScreen(
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
     var settingsSubScreen by rememberSaveable { mutableStateOf("main") }
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
+    var skills by rememberSaveable { mutableStateOf(settings.skillsText) }
     var temperature by rememberSaveable { mutableStateOf(settings.temperature) }
     val stream = settings.stream
 
@@ -79,6 +80,9 @@ fun SettingsScreen(
 
     androidx.compose.runtime.LaunchedEffect(settings.systemPrompt) {
         if (settings.systemPrompt != system) system = settings.systemPrompt
+    }
+    androidx.compose.runtime.LaunchedEffect(settings.skillsText) {
+        if (settings.skillsText != skills) skills = settings.skillsText
     }
     androidx.compose.runtime.LaunchedEffect(settings.temperature) {
         if (settings.temperature != temperature) temperature = settings.temperature
@@ -242,8 +246,11 @@ fun SettingsScreen(
                             if (settings.skillsSource == "text") {
                                 Spacer(Modifier.height(6.dp))
                                 androidx.compose.foundation.text.BasicTextField(
-                                    value = settings.skillsText,
-                                    onValueChange = { value -> onChange { it.copy(skillsText = value) } },
+                                    value = skills,
+                                    onValueChange = { value ->
+                                        skills = value
+                                        onChange { it.copy(skillsText = value) }
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
                                     textStyle = LocalTextStyle.current.copy(
                                         color = LocalContentColor.current,
