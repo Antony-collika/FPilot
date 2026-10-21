@@ -122,6 +122,7 @@ fun AppRoot(vm: ChatViewModel) {
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
     val pendingToolApproval by vm.pendingToolApproval.collectAsState()
+    val pendingLargeFileRead by vm.pendingLargeFileRead.collectAsState()
     val llmRequestLogs by vm.llmRequestLogs.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
@@ -278,6 +279,34 @@ fun AppRoot(vm: ChatViewModel) {
             activeModel = settings.activeModel,
             onPick = { pid, m -> vm.selectModel(pid, m) },
             onDismiss = { showModelPicker = false }
+        )
+    }
+
+    pendingLargeFileRead?.let { request ->
+        AlertDialog(
+            onDismissRequest = { vm.respondToLargeFileRead(false) },
+            title = { Text("Large file read limit") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("The requested file exceeds the current per-read limit.")
+                    Text(request.path, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "File size: ${request.sizeBytes?.let { "${it} bytes" } ?: "unknown"}. " +
+                            "Maximum section: ${request.maxReadChars} characters."
+                    )
+                    Text("Only one bounded section will be returned. Reading the next section may require another decision.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.respondToLargeFileRead(true) }) {
+                    Text("Read bounded section")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.respondToLargeFileRead(false) }) {
+                    Text("Cancel request")
+                }
+            }
         )
     }
 
