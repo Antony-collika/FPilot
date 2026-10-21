@@ -191,4 +191,35 @@ class AgentLoopTest {
         assertTrue(result.finalMessage.content.contains("No further tools were executed"))
     }
 
+    @Test
+    fun tinyToolResultBudgetStillReturnsAnExplicitTruncationMarker() = runBlocking {
+        var completionCount = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition(
+                name = "large",
+                description = "Return large content.",
+                parameters = Json.parseToJsonElement("""{"type":"object","properties":{} }""").jsonObject
+            )
+            override suspend fun execute(arguments: kotlinx.serialization.json.JsonObject): String = "x".repeat(1_000)
+        }
+        val loop = AgentLoop(
+            registry = AgentToolRegistry(listOf(tool)),
+            maxToolResultChars = 32,
+            complete = { messages, _ ->
+                completionCount++
+                if (completionCount == 1) {
+                    ChatMessage(role = "assistant", content = "", toolCalls = listOf(ToolCall("large-1", "large", "{}")))
+                } else {
+                    val result = messages.last { it.role == "tool" }.content
+                    assertTrue(result.contains("TRUNCATED"))
+                    assertTrue(result.contains("1000"))
+                    ChatMessage(role = "assistant", content = "Done.")
+                }
+            }
+        )
+
+        loop.run(listOf(ChatMessage(role = "user", content = "Run.")))
+        assertEquals(2, completionCount)
+    }
+
 }
