@@ -115,14 +115,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     ): Boolean {
         val current = settings.value
         if (call.name == "read_file") {
+            permissionSession.approvedLargeReadPath = null
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val readLimit = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000)
             val metadata = runCatching { workspaceRepository.fileEntry(path) }.getOrNull()
-            if (metadata?.sizeBytes?.let { it > readLimit.toLong() } == true) {
-                val approved = confirmLargeFileRead(path, metadata.sizeBytes, readLimit)
+            val sizeBytes = metadata?.sizeBytes
+            if (sizeBytes != null && sizeBytes > readLimit.toLong()) {
+                val approved = confirmLargeFileRead(path, sizeBytes, readLimit)
                 if (!approved) {
                     throw com.miniichat.agent.AgentLoopUserCancelledException(
-                        "The user cancelled reading '$path' after the application reported size_bytes=${metadata.sizeBytes}, above the $readLimit-character read limit."
+                        "The user cancelled reading '$path' after the application reported size_bytes=$sizeBytes, above the $readLimit-character read limit."
                     )
                 }
                 // The large-file decision authorizes this single bounded read and replaces
