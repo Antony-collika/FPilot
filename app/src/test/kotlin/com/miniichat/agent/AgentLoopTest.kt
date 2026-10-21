@@ -154,4 +154,41 @@ class AgentLoopTest {
         assertEquals(2, completionCount)
     }
 
+    @Test
+    fun terminalExplanationIgnoresUnexpectedToolCalls() = runBlocking {
+        var completionCount = 0
+        var executed = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition(
+                name = "read_file",
+                description = "Read a file.",
+                parameters = Json.parseToJsonElement("""{"type":"object","properties":{} }""").jsonObject
+            )
+            override suspend fun execute(arguments: kotlinx.serialization.json.JsonObject): String {
+                executed++
+                return "unexpected"
+            }
+        }
+        val loop = AgentLoop(
+            registry = AgentToolRegistry(listOf(tool)),
+            complete = { _, tools ->
+                completionCount++
+                if (completionCount == 1) {
+                    ChatMessage(role = "assistant", content = "", toolCalls = listOf(ToolCall("read-1", "read_file", "{}")))
+                } else {
+                    assertTrue(tools.isEmpty())
+                    ChatMessage(role = "assistant", content = "", toolCalls = listOf(ToolCall("read-2", "read_file", "{}")))
+                }
+            },
+            confirmToolCall = { _, _ -> throw AgentLoopUserCancelledException("user cancelled") }
+        )
+
+        val result = loop.run(listOf(ChatMessage(role = "user", content = "Inspect the file.")))
+
+        assertEquals(2, completionCount)
+        assertEquals(0, executed)
+        assertTrue(result.userCancelled)
+        assertTrue(result.finalMessage.content.contains("No further tools were executed"))
+    }
+
 }
