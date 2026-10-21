@@ -22,12 +22,12 @@ object MarkdownFileTools {
         maxWriteChars: Int = 100_000,
         allowedWriteSubpath: String = "",
         enabledTools: Set<String> = ALL_TOOL_NAMES,
-        maxReadChars: Int = 16_000,
-        confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxReadChars: Int) -> Boolean = { _, _, _ -> false }
+        maxChunkBytes: Int = 32_000,
+        confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxChunkBytes: Int) -> Boolean = { _, _, _ -> false }
     ): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
-            ReadFileTool(repository, maxReadChars, confirmLargeRead), GetFileInfoTool(repository)
+            ReadFileTool(repository, maxChunkBytes, confirmLargeRead), GetFileInfoTool(repository)
         )
         if (allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
         if (allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
@@ -128,8 +128,8 @@ object MarkdownFileTools {
 
     private class ReadFileTool(
         private val files: SafFileRepository,
-        private val maxReadChars: Int,
-        private val confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxReadChars: Int) -> Boolean
+        private val maxChunkBytes: Int,
+        private val confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxChunkBytes: Int) -> Boolean
     ) : AgentTool {
         override val definition = ToolDefinition(
             name = "read_file",
@@ -149,13 +149,13 @@ object MarkdownFileTools {
                 throw IllegalArgumentException("Cannot read a directory as a file: $path")
             }
 
-            val knownOversized = metadata?.sizeBytes?.let { it > maxReadChars.toLong() } == true
+            val knownOversized = metadata?.sizeBytes?.let { it > maxChunkBytes.toLong() } == true
             var approved = false
             if (knownOversized) {
-                approved = confirmLargeRead(path, metadata?.sizeBytes, maxReadChars)
+                approved = confirmLargeRead(path, metadata?.sizeBytes, maxChunkBytes)
                 if (!approved) {
                     throw AgentLoopUserCancelledException(
-                        "The user cancelled reading '$path' after the application reported size_bytes=${metadata?.sizeBytes}, above the $maxReadChars-character read limit."
+                        "The user cancelled reading '$path' after the application reported size_bytes=${metadata?.sizeBytes}, above the $maxChunkBytes-byte chunk size."
                     )
                 }
             }
@@ -168,12 +168,12 @@ object MarkdownFileTools {
                 0
             }
 
-            val chunk = files.readTextChunk(path, startOffset = startOffset, maxChars = maxReadChars)
+            val chunk = files.readTextChunk(path, startOffset = startOffset, maxBytes = maxChunkBytes)
             if (chunk.hasMore && !approved) {
-                approved = confirmLargeRead(path, chunk.sizeBytes, maxReadChars)
+                approved = confirmLargeRead(path, chunk.sizeBytes, maxChunkBytes)
                 if (!approved) {
                     throw AgentLoopUserCancelledException(
-                        "The user cancelled reading '$path' after the application detected more than $maxReadChars characters."
+                        "The user cancelled reading '$path' after the application detected content exceeding the $maxChunkBytes-byte chunk size."
                     )
                 }
             }
