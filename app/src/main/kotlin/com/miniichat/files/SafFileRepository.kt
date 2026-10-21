@@ -135,31 +135,84 @@ class SafFileRepository(
             lines.joinToString("\n") + "\n[/TREE]"
     }
 
-    suspend fun readText(
+    data class TextChunk(
+        val path: String,
+        val startOffset: Int,
+        val content: String,
+        val nextOffset: Int,
+        val hasMore: Boolean,
+        val sizeBytes: Long?
+    )
+
+    /** Returns metadata without opening or reading the file contents. */
+    suspend fun fileEntry(path: String): Entry? {
+        val normalized = normalizeRelativePath(path)
+        require(normalized.isNotBlank()) { "A file path is required." }
+        val parent = normalized.substringBeforeLast('/', "")
+        val name = normalized.substringAfterLast('/')
+        return list(parent).firstOrNull { it.name == name }
+    }
+
+    /**
+     * Reads at most maxChars UTF-16 characters starting at a zero-based character offset.
+     * The extra character is only used to determine hasMore and is never returned.
+     */
+    suspend fun readTextChunk(
         path: String,
-        charset: Charset = Charsets.UTF_8,
-        maxChars: Int = MAX_READ_CHARS
-    ): String {
+        startOffset: Int = 0,
+        maxChars: Int,
+        charset: Charset = Charsets.UTF_8
+    ): TextChunk {
+        require(startOffset >= 0) { "startOffset must not be negative." }
         require(maxChars > 0) { "maxChars must be positive." }
         val uri = resolve(path)
         require(!isDirectory(uri)) { "Cannot read a directory as a file." }
+        val metadataSize = runCatching { fileEntry(path)?.sizeBytes }.getOrNull()
         val input = contentResolver.openInputStream(uri)
             ?: throw IOException("The document provider could not open this file.")
         return input.bufferedReader(charset).use { reader ->
+            val skipBuffer = CharArray(8_192)
+            var remainingToSkip = startOffset
+            while (remainingToSkip > 0) {
+                val count = reader.read(skipBuffer, 0, minOf(skipBuffer.size, remainingToSkip))
+                if (count < 0) {
+                    return@use TextChunk(path, startOffset, "", startOffset, false, metadataSize)
+                }
+                remainingToSkip -= count
+            }
+
             val result = StringBuilder()
             val buffer = CharArray(8_192)
-            while (true) {
+            while (result.length <= maxChars) {
                 val remaining = maxChars + 1 - result.length
                 if (remaining <= 0) break
                 val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
                 if (count < 0) break
                 result.append(buffer, 0, count)
             }
-            if (result.length > maxChars) {
-                throw IOException("File exceeds the $maxChars character read limit.")
-            }
-            result.toString()
+            val hasMore = result.length > maxChars
+            val content = if (hasMore) result.substring(0, maxChars) else result.toString()
+            TextChunk(
+                path = path,
+                startOffset = startOffset,
+                content = content,
+                nextOffset = startOffset + content.length,
+                hasMore = hasMore,
+                sizeBytes = metadataSize
+            )
         }
+    }
+
+    suspend fun readText(
+        path: String,
+        charset: Charset = Charsets.UTF_8,
+        maxChars: Int = MAX_READ_CHARS
+    ): String {
+        val chunk = readTextChunk(path, startOffset = 0, maxChars = maxChars, charset = charset)
+        if (chunk.hasMore) {
+            throw IOException("File exceeds the $maxChars character read limit.")
+        }
+        return chunk.content
     }
 
     suspend fun writeText(path: String, content: String, mimeType: String = "text/markdown"): Uri {
