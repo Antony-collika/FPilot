@@ -49,7 +49,7 @@ data class AppSettings(
     val skillsText: String = "",
     val skillsFileUri: String = "",
     val skillsFileName: String = "",
-    val agentMaxFileReadChars: Int = 32_000
+    val agentMaxFileReadKb: Int = 32
 )
 
 class SettingsRepository(private val context: Context) {
@@ -69,7 +69,8 @@ class SettingsRepository(private val context: Context) {
         val ALLOW_WORKSPACE_EDIT = booleanPreferencesKey("allow_workspace_edit")
         val AGENT_MAX_TOOL_ROUNDS = intPreferencesKey("agent_max_tool_rounds")
         val AGENT_MAX_TOOL_RESULT_CHARS = intPreferencesKey("agent_max_tool_result_chars")
-        val AGENT_MAX_FILE_READ_CHARS = intPreferencesKey("agent_max_file_read_chars")
+        val AGENT_MAX_FILE_READ_KB = intPreferencesKey("agent_max_file_read_kb")
+        val LEGACY_AGENT_MAX_FILE_READ_CHARS = intPreferencesKey("agent_max_file_read_chars")
         val AGENT_MAX_WRITE_CHARS = intPreferencesKey("agent_max_write_chars")
         val TOOL_PERMISSION_MODE = stringPreferencesKey("tool_permission_mode")
         val TOOL_LIST_FILES = booleanPreferencesKey("tool_list_files_enabled")
@@ -109,7 +110,7 @@ class SettingsRepository(private val context: Context) {
         allowWorkspaceEdit = p[Keys.ALLOW_WORKSPACE_EDIT] ?: true,
         agentMaxToolRounds = (p[Keys.AGENT_MAX_TOOL_ROUNDS] ?: 8).coerceIn(1, 20),
         agentMaxToolResultChars = (p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] ?: 24_000).coerceIn(4_000, 64_000),
-        agentMaxFileReadChars = (p[Keys.AGENT_MAX_FILE_READ_CHARS] ?: 32_000).coerceIn(8_000, 256_000),
+        agentMaxFileReadKb = (p[Keys.AGENT_MAX_FILE_READ_KB] ?: ((p[Keys.LEGACY_AGENT_MAX_FILE_READ_CHARS] ?: 32_000) / 1_000)).coerceIn(8, 256),
         agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(10_000, 100_000),
         toolPermissionMode = (p[Keys.TOOL_PERMISSION_MODE] ?: "always_ask").takeIf {
             it in setOf("always_ask", "allow_once", "always_allow")
@@ -151,7 +152,8 @@ class SettingsRepository(private val context: Context) {
             p[Keys.ALLOW_WORKSPACE_EDIT] = next.allowWorkspaceEdit
             p[Keys.AGENT_MAX_TOOL_ROUNDS] = next.agentMaxToolRounds.coerceIn(1, 20)
             p[Keys.AGENT_MAX_TOOL_RESULT_CHARS] = next.agentMaxToolResultChars.coerceIn(4_000, 64_000)
-            p[Keys.AGENT_MAX_FILE_READ_CHARS] = next.agentMaxFileReadChars.coerceIn(8_000, 256_000)
+            p[Keys.AGENT_MAX_FILE_READ_KB] = next.agentMaxFileReadKb.coerceIn(8, 256)
+            p.remove(Keys.LEGACY_AGENT_MAX_FILE_READ_CHARS)
             p[Keys.AGENT_MAX_WRITE_CHARS] = next.agentMaxWriteChars.coerceIn(10_000, 100_000)
             p[Keys.TOOL_PERMISSION_MODE] = next.toolPermissionMode.takeIf {
                 it in setOf("always_ask", "allow_once", "always_allow")
