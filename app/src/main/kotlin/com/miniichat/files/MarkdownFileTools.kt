@@ -163,8 +163,7 @@ object MarkdownFileTools {
             val startOffset = if (hasExplicitOffset) {
                 intArg(arguments, "start_offset", 0).coerceAtLeast(0)
             } else if (startLine > 1) {
-                files.lineStartOffset(path, startLine) ?: return
-                    "[FILE_READ status=complete path=\"$path\" requested_start_line=$startLine has_more=false]\nNo content exists at the requested start line."
+                files.lineStartOffset(path, startLine) ?: return "[FILE_READ status=complete path=\"$path\" requested_start_line=$startLine has_more=false]\nNo content exists at the requested start line."
             } else {
                 0
             }
