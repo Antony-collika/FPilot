@@ -118,7 +118,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             permissionSession.approvedLargeReadPath = null
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val readLimit = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000)
-            val metadata = runCatching { workspaceRepository.fileEntry(path) }.getOrNull()
+            val metadata = try {
+                workspaceRepository.fileEntry(path)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
             val sizeBytes = metadata?.sizeBytes
             if (sizeBytes != null && sizeBytes > readLimit.toLong()) {
                 val approved = confirmLargeFileRead(path, sizeBytes, readLimit)
