@@ -292,7 +292,7 @@ fun AppRoot(vm: ChatViewModel) {
                     Text(request.path, style = MaterialTheme.typography.titleSmall)
                     Text(
                         "File size: ${request.sizeBytes?.let { "${it} bytes" } ?: "unknown"}. " +
-                            "Max chunk size: ${request.maxReadChars / 1000} kB."
+                            "Max chunk size: ${request.maxChunkBytes / 1000} kB."
                     )
                     Text("The file will be read in chunks. You can change the chunk size in Settings → Tool permissions → Max chunk size.")
                 }
