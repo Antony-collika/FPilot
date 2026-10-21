@@ -183,15 +183,15 @@ object MarkdownFileTools {
             } else {
                 (endLine - startLine + 1).coerceAtLeast(1)
             }
-            val selectedLines = if (hasLineRange) {
-                chunk.content.lineSequence().take(requestedLineCount).toList()
+            val selected = if (hasLineRange && endLine != Int.MAX_VALUE) {
+                takeLines(chunk.content, requestedLineCount)
             } else {
-                emptyList()
+                chunk.content
             }
-            val selected = if (hasLineRange) selectedLines.joinToString("\n") else chunk.content
+            val availableLines = chunk.content.lineSequence().count()
             val lineRangeComplete = hasLineRange &&
                 endLine != Int.MAX_VALUE &&
-                selectedLines.size >= requestedLineCount &&
+                availableLines >= requestedLineCount &&
                 (!chunk.hasMore || countLineBreaks(chunk.content) >= requestedLineCount)
             val hasMore = chunk.hasMore && !lineRangeComplete
             val status = if (hasMore) "partial" else "complete"
@@ -304,6 +304,27 @@ object MarkdownFileTools {
     }
 
     val ALL_TOOL_NAMES = setOf("list_files", "search_files", "search_content", "read_file", "get_file_info", "create_file", "edit_file")
+
+    private fun takeLines(content: String, maxLines: Int): String {
+        if (maxLines <= 0) return ""
+        var line = 1
+        var index = 0
+        while (index < content.length) {
+            when (content[index]) {
+                '\r' -> {
+                    if (line >= maxLines) return content.substring(0, index + 1 + if (index + 1 < content.length && content[index + 1] == '\n') 1 else 0)
+                    line++
+                    if (index + 1 < content.length && content[index + 1] == '\n') index++
+                }
+                '\n' -> {
+                    if (line >= maxLines) return content.substring(0, index + 1)
+                    line++
+                }
+            }
+            index++
+        }
+        return content
+    }
 
     private fun countLineBreaks(content: String): Int {
         var count = 0
