@@ -30,7 +30,6 @@ data class AppSettings(
     val allowWorkspaceEdit: Boolean = true,
     val agentMaxToolRounds: Int = 8,
     val agentMaxToolResultChars: Int = 24_000,
-    val agentMaxFileReadChars: Int = 16_000,
     val agentMaxWriteChars: Int = 100_000,
     val toolPermissionMode: String = "always_ask", // always_ask | allow_once | always_allow
     val toolListFilesEnabled: Boolean = true,
@@ -49,7 +48,8 @@ data class AppSettings(
     val skillsSource: String = "text", // text | file
     val skillsText: String = "",
     val skillsFileUri: String = "",
-    val skillsFileName: String = ""
+    val skillsFileName: String = "",
+    val agentMaxFileReadChars: Int = 16_000
 )
 
 class SettingsRepository(private val context: Context) {
