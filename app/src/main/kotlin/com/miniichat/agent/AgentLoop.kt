@@ -129,7 +129,7 @@ class AgentLoop(
 
     private fun limitToolResult(result: String): String {
         if (result.length <= maxToolResultChars) return result
-        val marker = "\n[tool_result_truncated by AgentLoop; original_chars=${result.length}; returned_chars=${maxToolResultChars - 1}. Content is incomplete. Do not trust continuation offsets in this truncated result; request a smaller chunk.]"
+        val marker = "\n[tool_result_truncated by AgentLoop; original_chars=${result.length}; max_result_chars=$maxToolResultChars. Content is incomplete. Do not trust continuation offsets in this truncated result; request a smaller chunk.]"
         if (marker.length >= maxToolResultChars) return result.take(maxToolResultChars)
         return result.take(maxToolResultChars - marker.length) + marker
     }
@@ -145,7 +145,13 @@ class AgentLoop(
             content = "The user cancelled a file-read request because the application reported that the file exceeded the configured read limit. Reason: $reason. This is a terminal explanation turn. Explain the original task goal, why the requested file(s) were needed if that is clear from the conversation, what the application blocked, and practical next steps. Be explicit about which file contents were not read and do not claim to have inspected them. Do not request or attempt tools. The application will not execute any further tool calls."
         )
         val finalMessages = listOf(instruction) + messages
-        val completion = runCatching { complete(finalMessages, emptyList()) }.getOrNull()
+        val completion = try {
+            complete(finalMessages, emptyList())
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
         val final = if (completion != null && completion.toolCalls.isNullOrEmpty()) {
             completion
         } else {
