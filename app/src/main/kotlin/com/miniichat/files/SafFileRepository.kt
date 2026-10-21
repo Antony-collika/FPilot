@@ -154,6 +154,42 @@ class SafFileRepository(
         return list(parent).firstOrNull { it.name == name }
     }
 
+    /** Finds a 1-based line's zero-based character offset without buffering the file. */
+    suspend fun lineStartOffset(path: String, startLine: Int): Int? {
+        require(startLine >= 1) { "startLine must be positive." }
+        val uri = resolve(path)
+        require(!isDirectory(uri)) { "Cannot read a directory as a file." }
+        if (startLine == 1) return 0
+        val input = contentResolver.openInputStream(uri)
+            ?: throw IOException("The document provider could not open this file.")
+        return input.bufferedReader(Charsets.UTF_8).use { reader ->
+            var line = 1
+            var offset = 0
+            while (line < startLine) {
+                val next = reader.read()
+                if (next < 0) return@use null
+                offset++
+                when (next.toChar()) {
+                    '\n' -> line++
+                    '\r' -> {
+                        reader.mark(1)
+                        val following = reader.read()
+                        if (following == '\n'.code) {
+                            offset++
+                        } else if (following >= 0) {
+                            reader.reset()
+                        }
+                        line++
+                    }
+                }
+                if (offset == Int.MAX_VALUE) {
+                    throw IOException("File offset exceeds the supported character range.")
+                }
+            }
+            offset
+        }
+    }
+
     /**
      * Reads at most maxChars UTF-16 characters starting at a zero-based character offset.
      * The extra character is only used to determine hasMore and is never returned.
