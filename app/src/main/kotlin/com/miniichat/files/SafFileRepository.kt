@@ -18,7 +18,7 @@ class SafFileRepository(
     private val treeUri: Uri
 ) {
     companion object {
-        private const val MAX_READ_CHARS = 2_000_000
+        private const val MAX_READ_BYTES = 2_000_000
     }
     data class Entry(
         val name: String,
@@ -234,11 +234,11 @@ class SafFileRepository(
     suspend fun readText(
         path: String,
         charset: Charset = Charsets.UTF_8,
-        maxChars: Int = MAX_READ_CHARS
+        maxBytes: Int = MAX_READ_BYTES
     ): String {
-        val chunk = readTextChunk(path, startOffset = 0, maxBytes = maxChars, charset = charset)
+        val chunk = readTextChunk(path, startOffset = 0, maxBytes = maxBytes, charset = charset)
         if (chunk.hasMore) {
-            throw IOException("File exceeds the $maxChars byte read limit.")
+            throw IOException("File exceeds the $maxBytes byte read limit.")
         }
         return chunk.content
     }
