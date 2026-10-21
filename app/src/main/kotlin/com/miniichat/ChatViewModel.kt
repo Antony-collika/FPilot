@@ -34,6 +34,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
+data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxReadChars: Int)
 
 /** Temporary authorization scoped to one AgentLoop.run() invocation. */
 private class ToolPermissionSession {
@@ -83,6 +84,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _pendingToolApproval = MutableStateFlow<ToolApprovalRequest?>(null)
     val pendingToolApproval: StateFlow<ToolApprovalRequest?> = _pendingToolApproval.asStateFlow()
     private var approvalCompletion: CompletableDeferred<Boolean>? = null
+    private val _pendingLargeFileRead = MutableStateFlow<LargeFileReadRequest?>(null)
+    val pendingLargeFileRead: StateFlow<LargeFileReadRequest?> = _pendingLargeFileRead.asStateFlow()
+    private var largeFileReadCompletion: CompletableDeferred<Boolean>? = null
+
+    private suspend fun confirmLargeFileRead(path: String, sizeBytes: Long?, maxReadChars: Int): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        largeFileReadCompletion = deferred
+        _pendingLargeFileRead.value = LargeFileReadRequest(path, sizeBytes, maxReadChars)
+        return try {
+            deferred.await()
+        } finally {
+            if (largeFileReadCompletion === deferred) {
+                largeFileReadCompletion = null
+                _pendingLargeFileRead.value = null
+            }
+        }
+    }
+
+    fun respondToLargeFileRead(approved: Boolean) {
+        largeFileReadCompletion?.complete(approved)
+    }
 
     private suspend fun confirmToolCall(
         call: ToolCall,
@@ -452,7 +474,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 allowEdit = current.allowWorkspaceEdit && current.toolEditFileEnabled,
                                 maxWriteChars = current.agentMaxWriteChars,
                                 allowedWriteSubpath = current.workspaceWriteSubpath,
-                                enabledTools = enabledTools
+                                enabledTools = enabledTools,
+                                maxReadChars = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000),
+                                confirmLargeRead = { path, sizeBytes, limit ->
+                                    confirmLargeFileRead(path, sizeBytes, limit)
+                                }
                             ),
                             complete = { messages, tools ->
                                 client.completeTurn(
