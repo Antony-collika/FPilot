@@ -285,26 +285,26 @@ fun AppRoot(vm: ChatViewModel) {
     pendingLargeFileRead?.let { request ->
         AlertDialog(
             onDismissRequest = { vm.respondToLargeFileRead(false) },
-            title = { Text("Large file read limit") },
+            title = { Text("File too large to read at once") },
             text = {
                 androidx.compose.foundation.layout.Column {
-                    Text("The requested file exceeds the current per-read limit.")
+                    Text("The file is larger than the current chunk size.")
                     Text(request.path, style = MaterialTheme.typography.titleSmall)
                     Text(
                         "File size: ${request.sizeBytes?.let { "${it} bytes" } ?: "unknown"}. " +
-                            "Maximum section: ${request.maxReadChars} characters."
+                            "Max chunk size: ${request.maxReadChars / 1000} kB."
                     )
-                    Text("No file content has been returned to the model yet. If size metadata is unavailable, the app checks one bounded section locally. Reading the next section may require another decision. To change the limit, cancel this request and adjust Maximum file-read chunk in Settings.")
+                    Text("The file will be read in chunks. You can change the chunk size in Settings → Tool permissions → Max chunk size.")
                 }
             },
             confirmButton = {
                 TextButton(onClick = { vm.respondToLargeFileRead(true) }) {
-                    Text("Read bounded section")
+                    Text("Read more")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { vm.respondToLargeFileRead(false) }) {
-                    Text("Cancel request")
+                    Text("Cancel")
                 }
             }
         )
