@@ -158,8 +158,8 @@ fun SettingsScreen(
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                         Text("Maximum tool rounds: ${settings.agentMaxToolRounds}", style = MaterialTheme.typography.bodyLarge)
                         Slider(value = settings.agentMaxToolRounds.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxToolRounds = v.toInt().coerceIn(1, 20)) } }, valueRange = 1f..20f, steps = 18)
-                        Text("Max chunk size: ${settings.agentMaxFileReadChars / 1000} kB", style = MaterialTheme.typography.bodyLarge)
-                        Slider(value = settings.agentMaxFileReadChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxFileReadChars = ((v.toInt() + 4000) / 8000 * 8000).coerceIn(8_000, 256_000)) } }, valueRange = 8000f..256000f, steps = 30)
+                        Text("Max chunk size: ${settings.agentMaxFileReadKb} kB", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.agentMaxFileReadKb.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxFileReadKb = ((v.toInt() + 4) / 8 * 8).coerceIn(8, 256)) } }, valueRange = 8f..256f, steps = 30)
                         Text("Large files will be read in chunks.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("Maximum tool result: ${settings.agentMaxToolResultChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
                         Slider(value = settings.agentMaxToolResultChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxToolResultChars = ((v.toInt() + 2000) / 4000 * 4000).coerceIn(4000, 64000)) } }, valueRange = 4000f..64000f, steps = 14)
