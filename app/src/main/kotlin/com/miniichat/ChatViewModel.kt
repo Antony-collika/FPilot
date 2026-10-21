@@ -39,7 +39,8 @@ data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxR
 /** Temporary authorization scoped to one AgentLoop.run() invocation. */
 private class ToolPermissionSession {
     var allowOnceGranted: Boolean = false
-    var approvedLargeReadPath: String? = null
+    /** Large-file approval lasts for this agent run, so continuation chunks do not prompt again. */
+    val approvedLargeReadPaths: MutableSet<String> = mutableSetOf()
 }
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -115,8 +116,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     ): Boolean {
         val current = settings.value
         if (call.name == "read_file") {
-            permissionSession.approvedLargeReadPath = null
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            // Approval applies to this file for the current agent run, including later chunks.
+            if (path in permissionSession.approvedLargeReadPaths) return true
             val readLimit = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000)
             val metadata = try {
                 workspaceRepository.fileEntry(path)
@@ -133,9 +135,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         "The user cancelled reading '$path' after the application reported size_bytes=$sizeBytes, above the $readLimit-character read limit."
                     )
                 }
-                // The large-file decision authorizes this single bounded read and replaces
-                // the generic tool-approval dialog for this call.
-                permissionSession.approvedLargeReadPath = path
+                // The decision authorizes bounded reads of this path for this agent run.
+                permissionSession.approvedLargeReadPaths += path
                 return true
             }
         }
@@ -504,11 +505,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 enabledTools = enabledTools,
                                 maxReadChars = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000),
                                 confirmLargeRead = { path, sizeBytes, limit ->
-                                    if (permissionSession.approvedLargeReadPath == path) {
-                                        permissionSession.approvedLargeReadPath = null
+                                    if (path in permissionSession.approvedLargeReadPaths) {
                                         true
                                     } else {
-                                        confirmLargeFileRead(path, sizeBytes, limit)
+                                        val approved = confirmLargeFileRead(path, sizeBytes, limit)
+                                        if (approved) permissionSession.approvedLargeReadPaths += path
+                                        approved
                                     }
                                 }
                             ),
