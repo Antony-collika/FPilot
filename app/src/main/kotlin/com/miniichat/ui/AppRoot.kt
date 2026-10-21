@@ -294,7 +294,7 @@ fun AppRoot(vm: ChatViewModel) {
                         "File size: ${request.sizeBytes?.let { "${it} bytes" } ?: "unknown"}. " +
                             "Maximum section: ${request.maxReadChars} characters."
                     )
-                    Text("Only one bounded section will be returned. Reading the next section may require another decision. To change the limit, cancel this request and adjust Maximum file-read chunk in Settings.")
+                    Text("No file content has been returned to the model yet. If size metadata is unavailable, the app checks one bounded section locally. Reading the next section may require another decision. To change the limit, cancel this request and adjust Maximum file-read chunk in Settings.")
                 }
             },
             confirmButton = {
