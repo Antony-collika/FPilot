@@ -34,7 +34,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
-data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxReadChars: Int)
+data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxChunkBytes: Int)
 
 /** Temporary authorization scoped to one AgentLoop.run() invocation. */
 private class ToolPermissionSession {
@@ -90,10 +90,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val pendingLargeFileRead: StateFlow<LargeFileReadRequest?> = _pendingLargeFileRead.asStateFlow()
     private var largeFileReadCompletion: CompletableDeferred<Boolean>? = null
 
-    private suspend fun confirmLargeFileRead(path: String, sizeBytes: Long?, maxReadChars: Int): Boolean {
+    private suspend fun confirmLargeFileRead(path: String, sizeBytes: Long?, maxChunkBytes: Int): Boolean {
         val deferred = CompletableDeferred<Boolean>()
         largeFileReadCompletion = deferred
-        _pendingLargeFileRead.value = LargeFileReadRequest(path, sizeBytes, maxReadChars)
+        _pendingLargeFileRead.value = LargeFileReadRequest(path, sizeBytes, maxChunkBytes)
         return try {
             deferred.await()
         } finally {
@@ -119,7 +119,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
             // Approval applies to this file for the current agent run, including later chunks.
             if (path in permissionSession.approvedLargeReadPaths) return true
-            val readLimit = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000)
+            val maxChunkBytes = current.agentMaxFileReadKb * 1_000
             val metadata = try {
                 workspaceRepository.fileEntry(path)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -128,11 +128,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 null
             }
             val sizeBytes = metadata?.sizeBytes
-            if (sizeBytes != null && sizeBytes > readLimit.toLong()) {
-                val approved = confirmLargeFileRead(path, sizeBytes, readLimit)
+            if (sizeBytes != null && sizeBytes > maxChunkBytes.toLong()) {
+                val approved = confirmLargeFileRead(path, sizeBytes, maxChunkBytes)
                 if (!approved) {
                     throw com.miniichat.agent.AgentLoopUserCancelledException(
-                        "The user cancelled reading '$path' after the application reported size_bytes=$sizeBytes, above the $readLimit-character read limit."
+                        "The user cancelled reading '$path' after the application reported size_bytes=$sizeBytes, above the $maxChunkBytes-byte chunk size."
                     )
                 }
                 // The decision authorizes bounded reads of this path for this agent run.
@@ -503,7 +503,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 maxWriteChars = current.agentMaxWriteChars,
                                 allowedWriteSubpath = current.workspaceWriteSubpath,
                                 enabledTools = enabledTools,
-                                maxReadChars = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000),
+                                maxChunkBytes = current.agentMaxFileReadKb * 1_000,
                                 confirmLargeRead = { path, sizeBytes, limit ->
                                     if (path in permissionSession.approvedLargeReadPaths) {
                                         true
