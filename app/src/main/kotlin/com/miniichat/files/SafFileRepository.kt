@@ -191,62 +191,43 @@ class SafFileRepository(
     }
 
     /**
-     * Reads at most maxChars UTF-16 characters starting at a zero-based character offset.
-     * The extra character is only used to determine hasMore and is never returned.
+     * Reads text up to maxBytes of encoded content from a zero-based UTF-16 character offset.
+     * Continuation offsets remain character-based for compatibility with line-range reads,
+     * while the maximum chunk size is enforced in bytes.
      */
-    suspend fun readTextChunk(
-        path: String,
-        startOffset: Int = 0,
-        maxChars: Int,
-        charset: Charset = Charsets.UTF_8
-    ): TextChunk {
+    suspend fun readTextChunk(path: String, startOffset: Int = 0, maxBytes: Int, charset: Charset = Charsets.UTF_8): TextChunk {
         require(startOffset >= 0) { "startOffset must not be negative." }
-        require(maxChars > 0) { "maxChars must be positive." }
+        require(maxBytes > 0) { "maxBytes must be positive." }
         val uri = resolve(path)
         require(!isDirectory(uri)) { "Cannot read a directory as a file." }
-        val metadataSize = try {
-            fileEntry(path)?.sizeBytes
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
-        val input = contentResolver.openInputStream(uri)
-            ?: throw IOException("The document provider could not open this file.")
+        val metadataSize = try { fileEntry(path)?.sizeBytes } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+        val input = contentResolver.openInputStream(uri) ?: throw IOException("The document provider could not open this file.")
         return input.bufferedReader(charset).use { reader ->
             val skipBuffer = CharArray(8_192)
             var remainingToSkip = startOffset
             while (remainingToSkip > 0) {
                 val count = reader.read(skipBuffer, 0, minOf(skipBuffer.size, remainingToSkip))
-                if (count < 0) {
-                    return@use TextChunk(path, startOffset, "", startOffset, false, metadataSize)
-                }
+                if (count < 0) return@use TextChunk(path, startOffset, "", startOffset, false, metadataSize)
                 remainingToSkip -= count
             }
-
             val result = StringBuilder()
-            val buffer = CharArray(8_192)
-            while (result.length <= maxChars) {
-                val remaining = maxChars + 1 - result.length
-                if (remaining <= 0) break
-                val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
-                if (count < 0) break
-                result.append(buffer, 0, count)
+            var consumedBytes = 0
+            var hasMore = false
+            while (true) {
+                reader.mark(2)
+                val first = reader.read()
+                if (first < 0) break
+                val text = if (first.toChar().isHighSurrogate()) {
+                    val second = reader.read()
+                    if (second >= 0 && second.toChar().isLowSurrogate()) "${first.toChar()}${second.toChar()}"
+                    else { reader.reset(); reader.read(); first.toChar().toString() }
+                } else first.toChar().toString()
+                val encodedBytes = text.toByteArray(charset).size
+                if (consumedBytes + encodedBytes > maxBytes) { reader.reset(); hasMore = true; break }
+                result.append(text)
+                consumedBytes += encodedBytes
             }
-            val hasMore = result.length > maxChars
-            var content = if (hasMore) result.substring(0, maxChars) else result.toString()
-            // Do not split a UTF-16 surrogate pair across continuation boundaries.
-            if (hasMore && content.lastOrNull()?.isHighSurrogate() == true) {
-                content = content.dropLast(1)
-            }
-            TextChunk(
-                path = path,
-                startOffset = startOffset,
-                content = content,
-                nextOffset = startOffset + content.length,
-                hasMore = hasMore,
-                sizeBytes = metadataSize
-            )
+            TextChunk(path, startOffset, result.toString(), startOffset + result.length, hasMore, metadataSize)
         }
     }
 
@@ -255,9 +236,9 @@ class SafFileRepository(
         charset: Charset = Charsets.UTF_8,
         maxChars: Int = MAX_READ_CHARS
     ): String {
-        val chunk = readTextChunk(path, startOffset = 0, maxChars = maxChars, charset = charset)
+        val chunk = readTextChunk(path, startOffset = 0, maxBytes = maxChars, charset = charset)
         if (chunk.hasMore) {
-            throw IOException("File exceeds the $maxChars character read limit.")
+            throw IOException("File exceeds the $maxChars byte read limit.")
         }
         return chunk.content
     }
