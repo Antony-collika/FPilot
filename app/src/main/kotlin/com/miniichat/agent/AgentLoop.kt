@@ -132,7 +132,15 @@ class AgentLoop(
     private fun limitToolResult(result: String): String {
         if (result.length <= maxToolResultChars) return result
         val marker = "\n[tool_result_truncated by AgentLoop; original_chars=${result.length}; max_result_chars=$maxToolResultChars. Content is incomplete. Do not trust continuation offsets in this truncated result; request a smaller chunk.]"
-        if (marker.length >= maxToolResultChars) return result.take(maxToolResultChars)
+        if (marker.length >= maxToolResultChars) {
+            // Even an unusually small configured budget must visibly identify truncation.
+            val compactMarker = "[TRUNCATED original_chars=${result.length}]"
+            return if (maxToolResultChars >= compactMarker.length) {
+                compactMarker
+            } else {
+                "!".repeat(maxToolResultChars)
+            }
+        }
         return result.take(maxToolResultChars - marker.length) + marker
     }
 
