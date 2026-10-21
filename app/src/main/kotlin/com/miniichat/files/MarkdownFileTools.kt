@@ -2,6 +2,7 @@ package com.miniichat.files
 
 import com.miniichat.agent.AgentTool
 import com.miniichat.agent.AgentToolRegistry
+import com.miniichat.agent.AgentLoopUserCancelledException
 import com.miniichat.api.ToolDefinition
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -14,11 +15,19 @@ import kotlinx.serialization.json.jsonObject
  * to the SAF tree URI held by SafFileRepository.
  */
 object MarkdownFileTools {
-    fun registry(repository: SafFileRepository, allowCreate: Boolean = true,
-                 allowEdit: Boolean = true, maxWriteChars: Int = 100_000, allowedWriteSubpath: String = "", enabledTools: Set<String> = ALL_TOOL_NAMES): AgentToolRegistry {
+    fun registry(
+        repository: SafFileRepository,
+        allowCreate: Boolean = true,
+        allowEdit: Boolean = true,
+        maxWriteChars: Int = 100_000,
+        allowedWriteSubpath: String = "",
+        enabledTools: Set<String> = ALL_TOOL_NAMES,
+        maxReadChars: Int = 16_000,
+        confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxReadChars: Int) -> Boolean = { _, _, _ -> false }
+    ): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
-            ReadFileTool(repository), GetFileInfoTool(repository)
+            ReadFileTool(repository, maxReadChars, confirmLargeRead), GetFileInfoTool(repository)
         )
         if (allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
         if (allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
@@ -117,21 +126,73 @@ object MarkdownFileTools {
         }
     }
 
-    private class ReadFileTool(private val files: SafFileRepository) : AgentTool {
+    private class ReadFileTool(
+        private val files: SafFileRepository,
+        private val maxReadChars: Int,
+        private val confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxReadChars: Int) -> Boolean
+    ) : AgentTool {
         override val definition = ToolDefinition(
             name = "read_file",
-            description = "Read a UTF-8 text or Markdown file. Large results are truncated; use start_line and end_line for a section.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
+            description = "Read a bounded section of a UTF-8 text or Markdown file. Results explicitly report complete/partial status and a zero-based start_offset for continuing. Large files require user approval before content is returned.",
+            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_offset":{"type":"integer","minimum":0,"description":"Zero-based character offset for continuing a partial read."},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
         )
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
-            val content = files.readText(path)
-            val start = intArg(arguments, "start_line", 1).coerceAtLeast(1)
-            val end = intArg(arguments, "end_line", Int.MAX_VALUE).coerceAtLeast(start)
-            val selected = content.lineSequence().drop(start - 1).take((end - start + 1).coerceAtMost(2000)).toList()
-            val joined = selected.joinToString("\n")
-            return if (joined.length <= MAX_READ_CHARS) joined else joined.take(MAX_READ_CHARS) + "\n[truncated]"
+            val startOffset = intArg(arguments, "start_offset", 0).coerceAtLeast(0)
+            val metadata = files.fileEntry(path)
+            if (metadata?.isDirectory == true) {
+                throw IllegalArgumentException("Cannot read a directory as a file: $path")
+            }
+
+            val knownOversized = metadata?.sizeBytes?.let { it > maxReadChars.toLong() } == true
+            var approved = false
+            if (knownOversized) {
+                approved = confirmLargeRead(path, metadata?.sizeBytes, maxReadChars)
+                if (!approved) {
+                    throw AgentLoopUserCancelledException(
+                        "The user cancelled reading '$path' after the application reported size_bytes=${metadata?.sizeBytes}, above the $maxReadChars-character read limit."
+                    )
+                }
+            }
+
+            val chunk = files.readTextChunk(path, startOffset = startOffset, maxChars = maxReadChars)
+            if (chunk.hasMore && !approved) {
+                approved = confirmLargeRead(path, chunk.sizeBytes, maxReadChars)
+                if (!approved) {
+                    throw AgentLoopUserCancelledException(
+                        "The user cancelled reading '$path' after the application detected more than $maxReadChars characters."
+                    )
+                }
+            }
+
+            val startLine = intArg(arguments, "start_line", 1).coerceAtLeast(1)
+            val endLine = intArg(arguments, "end_line", Int.MAX_VALUE).coerceAtLeast(startLine)
+            val hasLineRange = arguments.containsKey("start_line") || arguments.containsKey("end_line")
+            val selected = if (hasLineRange && startOffset == 0) {
+                chunk.content.lineSequence()
+                    .drop(startLine - 1)
+                    .take((endLine - startLine + 1).coerceAtMost(2_000))
+                    .toList()
+                    .joinToString("\n")
+            } else {
+                chunk.content
+            }
+            val status = if (chunk.hasMore) "partial" else "complete"
+            val size = chunk.sizeBytes?.toString() ?: "unknown"
+            return buildString {
+                appendLine("[FILE_READ status=$status path=\"$path\" size_bytes=$size start_offset=${chunk.startOffset} returned_chars=${selected.length} next_offset=${chunk.nextOffset} has_more=${chunk.hasMore}]")
+                appendLine("[CONTENT]")
+                appendLine(selected)
+                append("[/CONTENT]")
+                if (chunk.hasMore) {
+                    appendLine()
+                    append("[CONTINUE with read_file(path=\"$path\", start_offset=${chunk.nextOffset}) to read the next section. This result is partial.]")
+                } else {
+                    appendLine()
+                    append("[FILE_READ_COMPLETE]")
+                }
+            }
         }
     }
 
