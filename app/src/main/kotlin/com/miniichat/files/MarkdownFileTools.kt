@@ -312,7 +312,10 @@ object MarkdownFileTools {
         while (index < content.length) {
             when (content[index]) {
                 '\r' -> {
-                    if (line >= maxLines) return content.substring(0, index + 1 + if (index + 1 < content.length && content[index + 1] == '\n') 1 else 0)
+                    if (line >= maxLines) {
+                        val end = index + 1 + (if (index + 1 < content.length && content[index + 1] == '\n') 1 else 0)
+                        return content.substring(0, end)
+                    }
                     line++
                     if (index + 1 < content.length && content[index + 1] == '\n') index++
                 }
