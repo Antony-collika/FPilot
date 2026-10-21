@@ -133,13 +133,17 @@ object MarkdownFileTools {
     ) : AgentTool {
         override val definition = ToolDefinition(
             name = "read_file",
-            description = "Read a bounded section of a UTF-8 text or Markdown file. Results explicitly report complete/partial status and a zero-based start_offset for continuing. Large files require user approval before content is returned.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_offset":{"type":"integer","minimum":0,"description":"Zero-based character offset for continuing a partial read."},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
+            description = "Read a bounded section of a UTF-8 text or Markdown file. Large files require user approval. Results explicitly report complete/partial status and a zero-based start_offset for continuing. Use start_line/end_line for line ranges.",
+            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_offset":{"type":"integer","minimum":0,"description":"Zero-based character offset for continuing a partial read; takes precedence over line arguments."},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
         )
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
-            val startOffset = intArg(arguments, "start_offset", 0).coerceAtLeast(0)
+            val hasExplicitOffset = arguments.containsKey("start_offset")
+            val startLine = intArg(arguments, "start_line", 1).coerceAtLeast(1)
+            val endLine = intArg(arguments, "end_line", Int.MAX_VALUE).coerceAtLeast(startLine)
+            val hasLineRange = !hasExplicitOffset &&
+                (arguments.containsKey("start_line") || arguments.containsKey("end_line"))
             val metadata = files.fileEntry(path)
             if (metadata?.isDirectory == true) {
                 throw IllegalArgumentException("Cannot read a directory as a file: $path")
@@ -156,6 +160,15 @@ object MarkdownFileTools {
                 }
             }
 
+            val startOffset = if (hasExplicitOffset) {
+                intArg(arguments, "start_offset", 0).coerceAtLeast(0)
+            } else if (startLine > 1) {
+                files.lineStartOffset(path, startLine) ?: return
+                    "[FILE_READ status=complete path=\"$path\" requested_start_line=$startLine has_more=false]\nNo content exists at the requested start line."
+            } else {
+                0
+            }
+
             val chunk = files.readTextChunk(path, startOffset = startOffset, maxChars = maxReadChars)
             if (chunk.hasMore && !approved) {
                 approved = confirmLargeRead(path, chunk.sizeBytes, maxReadChars)
@@ -166,26 +179,31 @@ object MarkdownFileTools {
                 }
             }
 
-            val startLine = intArg(arguments, "start_line", 1).coerceAtLeast(1)
-            val endLine = intArg(arguments, "end_line", Int.MAX_VALUE).coerceAtLeast(startLine)
-            val hasLineRange = arguments.containsKey("start_line") || arguments.containsKey("end_line")
-            val selected = if (hasLineRange && startOffset == 0) {
-                chunk.content.lineSequence()
-                    .drop(startLine - 1)
-                    .take((endLine - startLine + 1).coerceAtMost(2_000))
-                    .toList()
-                    .joinToString("\n")
+            val requestedLineCount = if (endLine == Int.MAX_VALUE) {
+                Int.MAX_VALUE
             } else {
-                chunk.content
+                (endLine - startLine + 1).coerceAtLeast(1)
             }
-            val status = if (chunk.hasMore) "partial" else "complete"
+            val selectedLines = if (hasLineRange) {
+                chunk.content.lineSequence().take(requestedLineCount).toList()
+            } else {
+                emptyList()
+            }
+            val selected = if (hasLineRange) selectedLines.joinToString("\n") else chunk.content
+            val lineRangeComplete = hasLineRange &&
+                endLine != Int.MAX_VALUE &&
+                selectedLines.size >= requestedLineCount &&
+                (!chunk.hasMore || countLineBreaks(chunk.content) >= requestedLineCount)
+            val hasMore = chunk.hasMore && !lineRangeComplete
+            val status = if (hasMore) "partial" else "complete"
             val size = chunk.sizeBytes?.toString() ?: "unknown"
+            val nextOffset = if (hasMore) chunk.nextOffset.toString() else "none"
             return buildString {
-                appendLine("[FILE_READ status=$status path=\"$path\" size_bytes=$size start_offset=${chunk.startOffset} returned_chars=${selected.length} next_offset=${chunk.nextOffset} has_more=${chunk.hasMore}]")
+                appendLine("[FILE_READ status=$status path=\"$path\" size_bytes=$size start_offset=${chunk.startOffset} returned_chars=${selected.length} next_offset=$nextOffset has_more=$hasMore range_complete=$lineRangeComplete]")
                 appendLine("[CONTENT]")
                 appendLine(selected)
                 append("[/CONTENT]")
-                if (chunk.hasMore) {
+                if (hasMore) {
                     appendLine()
                     append("[CONTINUE with read_file(path=\"$path\", start_offset=${chunk.nextOffset}) to read the next section. This result is partial.]")
                 } else {
@@ -287,6 +305,22 @@ object MarkdownFileTools {
     }
 
     val ALL_TOOL_NAMES = setOf("list_files", "search_files", "search_content", "read_file", "get_file_info", "create_file", "edit_file")
+
+    private fun countLineBreaks(content: String): Int {
+        var count = 0
+        var index = 0
+        while (index < content.length) {
+            when (content[index]) {
+                '\r' -> {
+                    count++
+                    if (index + 1 < content.length && content[index + 1] == '\n') index++
+                }
+                '\n' -> count++
+            }
+            index++
+        }
+        return count
+    }
 
     private const val MAX_DEPTH = 8
     private const val MAX_VISITED = 2_000
