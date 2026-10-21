@@ -191,7 +191,11 @@ class SafFileRepository(
                 result.append(buffer, 0, count)
             }
             val hasMore = result.length > maxChars
-            val content = if (hasMore) result.substring(0, maxChars) else result.toString()
+            var content = if (hasMore) result.substring(0, maxChars) else result.toString()
+            // Do not split a UTF-16 surrogate pair across continuation boundaries.
+            if (hasMore && content.lastOrNull()?.isHighSurrogate() == true) {
+                content = content.dropLast(1)
+            }
             TextChunk(
                 path = path,
                 startOffset = startOffset,
