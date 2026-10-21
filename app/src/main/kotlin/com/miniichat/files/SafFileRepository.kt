@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.IOException
 import java.nio.charset.Charset
+import kotlinx.coroutines.CancellationException
 
 /**
  * Small SAF adapter scoped to a user-selected tree URI.
@@ -167,7 +168,13 @@ class SafFileRepository(
         require(maxChars > 0) { "maxChars must be positive." }
         val uri = resolve(path)
         require(!isDirectory(uri)) { "Cannot read a directory as a file." }
-        val metadataSize = runCatching { fileEntry(path)?.sizeBytes }.getOrNull()
+        val metadataSize = try {
+            fileEntry(path)?.sizeBytes
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
         val input = contentResolver.openInputStream(uri)
             ?: throw IOException("The document provider could not open this file.")
         return input.bufferedReader(charset).use { reader ->
