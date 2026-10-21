@@ -39,6 +39,7 @@ data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxR
 /** Temporary authorization scoped to one AgentLoop.run() invocation. */
 private class ToolPermissionSession {
     var allowOnceGranted: Boolean = false
+    var approvedLargeReadPath: String? = null
 }
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -109,9 +110,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun confirmToolCall(
         call: ToolCall,
         arguments: JsonObject,
-        permissionSession: ToolPermissionSession
+        permissionSession: ToolPermissionSession,
+        workspaceRepository: SafFileRepository
     ): Boolean {
         val current = settings.value
+        if (call.name == "read_file") {
+            val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val readLimit = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000)
+            val metadata = runCatching { workspaceRepository.fileEntry(path) }.getOrNull()
+            if (metadata?.sizeBytes?.let { it > readLimit.toLong() } == true) {
+                val approved = confirmLargeFileRead(path, metadata.sizeBytes, readLimit)
+                if (!approved) {
+                    throw com.miniichat.agent.AgentLoopUserCancelledException(
+                        "The user cancelled reading '$path' after the application reported size_bytes=${metadata.sizeBytes}, above the $readLimit-character read limit."
+                    )
+                }
+                // The large-file decision authorizes this single bounded read and replaces
+                // the generic tool-approval dialog for this call.
+                permissionSession.approvedLargeReadPath = path
+                return true
+            }
+        }
         val isWrite = call.name == "create_file" || call.name == "edit_file"
         if (isWrite) {
             // These are hard safety gates, independent of the selected tool permission mode.
@@ -477,7 +496,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 enabledTools = enabledTools,
                                 maxReadChars = minOf(current.agentMaxFileReadChars, current.agentMaxToolResultChars - 1_000).coerceAtLeast(1_000),
                                 confirmLargeRead = { path, sizeBytes, limit ->
-                                    confirmLargeFileRead(path, sizeBytes, limit)
+                                    if (permissionSession.approvedLargeReadPath == path) {
+                                        permissionSession.approvedLargeReadPath = null
+                                        true
+                                    } else {
+                                        confirmLargeFileRead(path, sizeBytes, limit)
+                                    }
                                 }
                             ),
                             complete = { messages, tools ->
@@ -493,7 +517,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             maxToolRounds = current.agentMaxToolRounds,
                             maxToolResultChars = current.agentMaxToolResultChars,
                             confirmToolCall = { call, arguments ->
-                                confirmToolCall(call, arguments, permissionSession)
+                                confirmToolCall(call, arguments, permissionSession, repository)
                             }
                         )
                         val result = agent.run(historyForApi)
