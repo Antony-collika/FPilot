@@ -115,6 +115,8 @@ class AgentLoop(
 
         return try {
             registry.execute(call.name, arguments)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (cancelled: AgentLoopUserCancelledException) {
             throw cancelled
         } catch (error: Exception) {
@@ -152,7 +154,7 @@ class AgentLoop(
         } catch (_: Exception) {
             null
         }
-        val final = if (completion != null && completion.toolCalls.isNullOrEmpty()) {
+        val final = if (completion != null && completion.toolCalls.isNullOrEmpty() && completion.content.isNotBlank()) {
             completion
         } else {
             ChatMessage(
