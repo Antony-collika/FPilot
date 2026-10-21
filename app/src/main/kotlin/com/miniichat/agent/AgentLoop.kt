@@ -119,7 +119,7 @@ class AgentLoop(
             throw cancelled
         } catch (error: Exception) {
             val path = arguments["path"]?.toString()
-                ?.removeSurrounding("\\\"")
+                ?.trim('"')
                 ?.ifBlank { "(workspace root)" }
                 ?: "(workspace root)"
             "Tool error for '${call.name}' at path '$path': ${error::class.simpleName}: ${error.message ?: "no error message"}. " +
