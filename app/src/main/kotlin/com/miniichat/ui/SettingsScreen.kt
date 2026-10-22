@@ -161,6 +161,8 @@ fun SettingsScreen(
                         Text("Max chunk size: ${settings.agentMaxFileReadKb} kB", style = MaterialTheme.typography.bodyLarge)
                         Slider(value = settings.agentMaxFileReadKb.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxFileReadKb = ((v.toInt() + 4) / 8 * 8).coerceIn(8, 256)) } }, valueRange = 8f..256f, steps = 30)
                         Text("Large files will be read in chunks.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Maximum file write: ${settings.agentMaxWriteChars / 1000}k characters", style = MaterialTheme.typography.bodyLarge)
+                        Slider(value = settings.agentMaxWriteChars.toFloat(), onValueChange = { v -> onChange { it.copy(agentMaxWriteChars = ((v.toInt() + 5000) / 10000 * 10000).coerceIn(10000, 100000)) } }, valueRange = 10000f..100000f, steps = 8)
                     }
                 }
             } else if (settingsSubScreen == "behavior") {
