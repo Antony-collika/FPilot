@@ -34,10 +34,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
+data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxChunkBytes: Int)
 
 /** Temporary authorization scoped to one AgentLoop.run() invocation. */
 private class ToolPermissionSession {
     var allowOnceGranted: Boolean = false
+    /** Large-file approval lasts for this agent run, so continuation chunks do not prompt again. */
+    val approvedLargeReadPaths: MutableSet<String> = mutableSetOf()
 }
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -83,13 +86,60 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _pendingToolApproval = MutableStateFlow<ToolApprovalRequest?>(null)
     val pendingToolApproval: StateFlow<ToolApprovalRequest?> = _pendingToolApproval.asStateFlow()
     private var approvalCompletion: CompletableDeferred<Boolean>? = null
+    private val _pendingLargeFileRead = MutableStateFlow<LargeFileReadRequest?>(null)
+    val pendingLargeFileRead: StateFlow<LargeFileReadRequest?> = _pendingLargeFileRead.asStateFlow()
+    private var largeFileReadCompletion: CompletableDeferred<Boolean>? = null
+
+    private suspend fun confirmLargeFileRead(path: String, sizeBytes: Long?, maxChunkBytes: Int): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        largeFileReadCompletion = deferred
+        _pendingLargeFileRead.value = LargeFileReadRequest(path, sizeBytes, maxChunkBytes)
+        return try {
+            deferred.await()
+        } finally {
+            if (largeFileReadCompletion === deferred) {
+                largeFileReadCompletion = null
+                _pendingLargeFileRead.value = null
+            }
+        }
+    }
+
+    fun respondToLargeFileRead(approved: Boolean) {
+        largeFileReadCompletion?.complete(approved)
+    }
 
     private suspend fun confirmToolCall(
         call: ToolCall,
         arguments: JsonObject,
-        permissionSession: ToolPermissionSession
+        permissionSession: ToolPermissionSession,
+        workspaceRepository: SafFileRepository
     ): Boolean {
         val current = settings.value
+        if (call.name == "read_file") {
+            val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            // Approval applies to this file for the current agent run, including later chunks.
+            if (path in permissionSession.approvedLargeReadPaths) return true
+            val maxChunkBytes = current.agentMaxFileReadKb * 1_000
+            val metadata = try {
+                workspaceRepository.fileEntry(path)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val sizeBytes = metadata?.sizeBytes
+            if (sizeBytes != null && sizeBytes > maxChunkBytes.toLong()) {
+                val approved = confirmLargeFileRead(path, sizeBytes, maxChunkBytes)
+                if (!approved) {
+                    throw com.miniichat.agent.AgentLoopUserCancelledException(
+                        "The user cancelled reading '$path' after the application reported size_bytes=$sizeBytes, above the $maxChunkBytes-byte chunk size."
+                    )
+                }
+                // The decision authorizes bounded reads of this path for this agent run.
+                permissionSession.approvedLargeReadPaths += path
+                return true
+            }
+        }
         val isWrite = call.name == "create_file" || call.name == "edit_file"
         if (isWrite) {
             // These are hard safety gates, independent of the selected tool permission mode.
@@ -452,7 +502,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 allowEdit = current.allowWorkspaceEdit && current.toolEditFileEnabled,
                                 maxWriteChars = current.agentMaxWriteChars,
                                 allowedWriteSubpath = current.workspaceWriteSubpath,
-                                enabledTools = enabledTools
+                                enabledTools = enabledTools,
+                                maxChunkBytes = current.agentMaxFileReadKb * 1_000,
+                                confirmLargeRead = { path, sizeBytes, limit ->
+                                    if (path in permissionSession.approvedLargeReadPaths) {
+                                        true
+                                    } else {
+                                        val approved = confirmLargeFileRead(path, sizeBytes, limit)
+                                        if (approved) permissionSession.approvedLargeReadPaths += path
+                                        approved
+                                    }
+                                }
                             ),
                             complete = { messages, tools ->
                                 client.completeTurn(
@@ -467,7 +527,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             maxToolRounds = current.agentMaxToolRounds,
                             maxToolResultChars = current.agentMaxToolResultChars,
                             confirmToolCall = { call, arguments ->
-                                confirmToolCall(call, arguments, permissionSession)
+                                confirmToolCall(call, arguments, permissionSession, repository)
                             }
                         )
                         val result = agent.run(historyForApi)

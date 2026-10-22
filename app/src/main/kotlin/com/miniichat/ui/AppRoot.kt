@@ -122,6 +122,7 @@ fun AppRoot(vm: ChatViewModel) {
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
     val pendingToolApproval by vm.pendingToolApproval.collectAsState()
+    val pendingLargeFileRead by vm.pendingLargeFileRead.collectAsState()
     val llmRequestLogs by vm.llmRequestLogs.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
@@ -278,6 +279,34 @@ fun AppRoot(vm: ChatViewModel) {
             activeModel = settings.activeModel,
             onPick = { pid, m -> vm.selectModel(pid, m) },
             onDismiss = { showModelPicker = false }
+        )
+    }
+
+    pendingLargeFileRead?.let { request ->
+        AlertDialog(
+            onDismissRequest = { vm.respondToLargeFileRead(false) },
+            title = { Text("File too large to read at once") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("The file is larger than the current chunk size.")
+                    Text(request.path, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "File size: ${request.sizeBytes?.let { "${it} bytes" } ?: "unknown"}. " +
+                            "Max chunk size: ${request.maxChunkBytes / 1000} kB."
+                    )
+                    Text("The file will be read in chunks. You can change the chunk size in Settings → Tool permissions → Max chunk size.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.respondToLargeFileRead(true) }) {
+                    Text("Read more")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.respondToLargeFileRead(false) }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.IOException
 import java.nio.charset.Charset
+import kotlinx.coroutines.CancellationException
 
 /**
  * Small SAF adapter scoped to a user-selected tree URI.
@@ -17,7 +18,7 @@ class SafFileRepository(
     private val treeUri: Uri
 ) {
     companion object {
-        private const val MAX_READ_CHARS = 2_000_000
+        private const val MAX_READ_BYTES = 2_000_000
     }
     data class Entry(
         val name: String,
@@ -135,31 +136,111 @@ class SafFileRepository(
             lines.joinToString("\n") + "\n[/TREE]"
     }
 
+    data class TextChunk(
+        val path: String,
+        val startOffset: Int,
+        val content: String,
+        val nextOffset: Int,
+        val hasMore: Boolean,
+        val sizeBytes: Long?
+    )
+
+    /** Returns metadata without opening or reading the file contents. */
+    suspend fun fileEntry(path: String): Entry? {
+        val normalized = normalizeRelativePath(path)
+        require(normalized.isNotBlank()) { "A file path is required." }
+        val parent = normalized.substringBeforeLast('/', "")
+        val name = normalized.substringAfterLast('/')
+        return list(parent).firstOrNull { it.name == name }
+    }
+
+    /** Finds a 1-based line's zero-based character offset without buffering the file. */
+    suspend fun lineStartOffset(path: String, startLine: Int): Int? {
+        require(startLine >= 1) { "startLine must be positive." }
+        val uri = resolve(path)
+        require(!isDirectory(uri)) { "Cannot read a directory as a file." }
+        if (startLine == 1) return 0
+        val input = contentResolver.openInputStream(uri)
+            ?: throw IOException("The document provider could not open this file.")
+        return input.bufferedReader(Charsets.UTF_8).use { reader ->
+            var line = 1
+            var offset = 0
+            while (line < startLine) {
+                val next = reader.read()
+                if (next < 0) return@use null
+                offset++
+                when (next.toChar()) {
+                    '\n' -> line++
+                    '\r' -> {
+                        reader.mark(1)
+                        val following = reader.read()
+                        if (following == '\n'.code) {
+                            offset++
+                        } else if (following >= 0) {
+                            reader.reset()
+                        }
+                        line++
+                    }
+                }
+                if (offset == Int.MAX_VALUE) {
+                    throw IOException("File offset exceeds the supported character range.")
+                }
+            }
+            offset
+        }
+    }
+
+    /**
+     * Reads text up to maxBytes of encoded content from a zero-based UTF-16 character offset.
+     * Continuation offsets remain character-based for compatibility with line-range reads,
+     * while the maximum chunk size is enforced in bytes.
+     */
+    suspend fun readTextChunk(path: String, startOffset: Int = 0, maxBytes: Int, charset: Charset = Charsets.UTF_8): TextChunk {
+        require(startOffset >= 0) { "startOffset must not be negative." }
+        require(maxBytes > 0) { "maxBytes must be positive." }
+        val uri = resolve(path)
+        require(!isDirectory(uri)) { "Cannot read a directory as a file." }
+        val metadataSize = try { fileEntry(path)?.sizeBytes } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+        val input = contentResolver.openInputStream(uri) ?: throw IOException("The document provider could not open this file.")
+        return input.bufferedReader(charset).use { reader ->
+            val skipBuffer = CharArray(8_192)
+            var remainingToSkip = startOffset
+            while (remainingToSkip > 0) {
+                val count = reader.read(skipBuffer, 0, minOf(skipBuffer.size, remainingToSkip))
+                if (count < 0) return@use TextChunk(path, startOffset, "", startOffset, false, metadataSize)
+                remainingToSkip -= count
+            }
+            val result = StringBuilder()
+            var consumedBytes = 0
+            var hasMore = false
+            while (true) {
+                reader.mark(2)
+                val first = reader.read()
+                if (first < 0) break
+                val text = if (first.toChar().isHighSurrogate()) {
+                    val second = reader.read()
+                    if (second >= 0 && second.toChar().isLowSurrogate()) "${first.toChar()}${second.toChar()}"
+                    else { reader.reset(); reader.read(); first.toChar().toString() }
+                } else first.toChar().toString()
+                val encodedBytes = text.toByteArray(charset).size
+                if (consumedBytes + encodedBytes > maxBytes) { reader.reset(); hasMore = true; break }
+                result.append(text)
+                consumedBytes += encodedBytes
+            }
+            TextChunk(path, startOffset, result.toString(), startOffset + result.length, hasMore, metadataSize)
+        }
+    }
+
     suspend fun readText(
         path: String,
         charset: Charset = Charsets.UTF_8,
-        maxChars: Int = MAX_READ_CHARS
+        maxBytes: Int = MAX_READ_BYTES
     ): String {
-        require(maxChars > 0) { "maxChars must be positive." }
-        val uri = resolve(path)
-        require(!isDirectory(uri)) { "Cannot read a directory as a file." }
-        val input = contentResolver.openInputStream(uri)
-            ?: throw IOException("The document provider could not open this file.")
-        return input.bufferedReader(charset).use { reader ->
-            val result = StringBuilder()
-            val buffer = CharArray(8_192)
-            while (true) {
-                val remaining = maxChars + 1 - result.length
-                if (remaining <= 0) break
-                val count = reader.read(buffer, 0, minOf(buffer.size, remaining))
-                if (count < 0) break
-                result.append(buffer, 0, count)
-            }
-            if (result.length > maxChars) {
-                throw IOException("File exceeds the $maxChars character read limit.")
-            }
-            result.toString()
+        val chunk = readTextChunk(path, startOffset = 0, maxBytes = maxBytes, charset = charset)
+        if (chunk.hasMore) {
+            throw IOException("File exceeds the $maxBytes byte read limit.")
         }
+        return chunk.content
     }
 
     suspend fun writeText(path: String, content: String, mimeType: String = "text/markdown"): Uri {
