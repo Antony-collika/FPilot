@@ -441,9 +441,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             } else {
                                 listOf(com.miniichat.api.ChatPart(type = "text", text = tail)) + parts
                             }
-                            historyForApi.add(ChatMessage(msg.role, msg.content, merged))
+                            historyForApi.add(ChatMessage(msg.role, msg.content, merged, extraContent = msg.extraContent))
                         } else {
-                            historyForApi.add(ChatMessage(msg.role, msg.content, parts))
+                            historyForApi.add(ChatMessage(msg.role, msg.content, parts, extraContent = msg.extraContent))
                         }
                     } else if (msg.role == "user" && msg.attachments.isNotEmpty()) {
                         // Files only — describe inline as text refs.
@@ -451,14 +451,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             "[file: ${it.name} (${it.mimeType})]"
                         }
                         val combined = if (msg.content.isBlank()) refs else "${msg.content}\n\n$refs"
-                        historyForApi.add(ChatMessage(msg.role, combined))
+                        historyForApi.add(ChatMessage(msg.role, combined, extraContent = msg.extraContent))
                     } else {
-                        historyForApi.add(ChatMessage(msg.role, msg.content))
+                        historyForApi.add(ChatMessage(msg.role, msg.content, extraContent = msg.extraContent))
                     }
                 }
 
             _isStreaming.value = true
             val builder = StringBuilder()
+            var streamExtraContent: JsonObject? = null
 
             // Use the Behavior temperature selected in Settings.
             val effectiveSettings = current.copy(temperature = temperature)
@@ -533,14 +534,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         val result = agent.run(historyForApi)
                         builder.append(result.finalMessage.content)
                         _streamingOverlay.value = assistantId to builder.toString()
-                        appendAssistant(activeId, assistantId, builder.toString())
+                        appendAssistant(
+                            activeId, assistantId, builder.toString(),
+                            result.finalMessage.extraContent
+                        )
                     } else {
                         client.chatStream(
                             provider = provider,
                             settings = effectiveSettings,
                             modelId = model,
                             messages = historyForApi,
-                            conversationId = activeId
+                            conversationId = activeId,
+                            onExtraContent = { streamExtraContent = it }
                         )
                             .collect { delta ->
                                 builder.append(delta)
@@ -562,7 +567,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     appendAssistant(activeId, assistantId, builder.toString())
                 } finally {
                     if (builder.isNotEmpty()) {
-                        appendAssistant(activeId, assistantId, builder.toString())
+                        appendAssistant(activeId, assistantId, builder.toString(), streamExtraContent)
                     }
                     _streamingOverlay.value = null
                     _isStreaming.value = false
@@ -572,10 +577,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun appendAssistant(convId: String, msgId: String, content: String) {
+    private suspend fun appendAssistant(
+        convId: String,
+        msgId: String,
+        content: String,
+        extraContent: JsonObject? = null
+    ) {
         val list = store.snapshot()
         val conv = list.firstOrNull { it.id == convId } ?: return
-        val newMsgs = conv.messages.map { if (it.id == msgId) it.copy(content = content) else it }
+        val newMsgs = conv.messages.map {
+            if (it.id == msgId) {
+                if (extraContent != null) it.copy(content = content, extraContent = extraContent)
+                else it.copy(content = content)
+            } else it
+        }
         store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
     }
 
