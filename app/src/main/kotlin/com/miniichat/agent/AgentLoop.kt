@@ -20,12 +20,10 @@ class AgentLoop(
         tools: List<ToolDefinition>
     ) -> ChatMessage,
     private val maxToolRounds: Int = DEFAULT_MAX_TOOL_ROUNDS,
-    private val maxToolResultChars: Int = DEFAULT_MAX_TOOL_RESULT_CHARS,
     private val confirmToolCall: suspend (ToolCall, JsonObject) -> Boolean = { _, _ -> true }
 ) {
     init {
         require(maxToolRounds > 0) { "maxToolRounds must be positive." }
-        require(maxToolResultChars > 0) { "maxToolResultChars must be positive." }
     }
 
     suspend fun run(initialMessages: List<ChatMessage>): AgentRunResult {
@@ -62,7 +60,7 @@ class AgentLoop(
                     val result = executeSafely(call)
                     messages += ChatMessage(
                         role = "tool",
-                        content = limitToolResult(result),
+                        content = result,
                         toolCallId = call.id,
                         name = call.name
                     )
@@ -129,20 +127,6 @@ class AgentLoop(
         }
     }
 
-    private fun limitToolResult(result: String): String {
-        if (result.length <= maxToolResultChars) return result
-        val marker = "\n[tool_result_truncated by AgentLoop; original_chars=${result.length}; max_result_chars=$maxToolResultChars. Content is incomplete. Do not trust continuation offsets in this truncated result; request a smaller chunk.]"
-        if (marker.length >= maxToolResultChars) {
-            // Even an unusually small configured budget must visibly identify truncation.
-            val compactMarker = "[TRUNCATED original_chars=${result.length}]"
-            return if (maxToolResultChars >= compactMarker.length) {
-                compactMarker
-            } else {
-                "!".repeat(maxToolResultChars)
-            }
-        }
-        return result.take(maxToolResultChars - marker.length) + marker
-    }
 
     private suspend fun finishAfterUserCancellation(
         messages: List<ChatMessage>,
@@ -181,7 +165,6 @@ class AgentLoop(
 
     companion object {
         const val DEFAULT_MAX_TOOL_ROUNDS = 8
-        const val DEFAULT_MAX_TOOL_RESULT_CHARS = 24_000
     }
 }
 
