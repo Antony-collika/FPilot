@@ -1,6 +1,8 @@
 package com.miniichat.data
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.json.JsonObject
 
 enum class Role { user, assistant, system }
 
@@ -19,7 +21,8 @@ data class Message(
     val role: String,
     val content: String,
     val attachments: List<Attachment> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @SerialName("extra_content") val extraContent: JsonObject? = null
 )
 
 @Serializable
