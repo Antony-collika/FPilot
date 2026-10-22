@@ -526,7 +526,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                             },
                             maxToolRounds = current.agentMaxToolRounds,
-                            maxToolResultChars = current.agentMaxToolResultChars,
                             confirmToolCall = { call, arguments ->
                                 confirmToolCall(call, arguments, permissionSession, repository)
                             }
