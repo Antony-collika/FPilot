@@ -55,7 +55,9 @@ data class ChatMessage(
     val parts: List<ChatPart>? = null,
     val toolCalls: List<ToolCall>? = null,
     val toolCallId: String? = null,
-    val name: String? = null
+    val name: String? = null,
+    /** Provider-specific metadata on the assistant message, e.g. Gemini thought signatures. */
+    val extraContent: JsonObject? = null
 ) {
     fun isMultipart(): Boolean = !parts.isNullOrEmpty()
 }
@@ -85,12 +87,17 @@ private data class ChatChunk(
         @SerialName("finish_reason") val finishReason: String? = null
     )
     @Serializable
-    data class Delta(val content: String? = null, val role: String? = null)
+    data class Delta(
+        val content: String? = null,
+        val role: String? = null,
+        @SerialName("extra_content") val extraContent: JsonObject? = null
+    )
     @Serializable
     data class ResponseMessage(
         val role: String = "assistant",
         val content: String? = "",
-        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall>? = null
+        @SerialName("tool_calls") val toolCalls: List<ResponseToolCall>? = null,
+        @SerialName("extra_content") val extraContent: JsonObject? = null
     )
     @Serializable
     data class ResponseToolCall(
@@ -202,6 +209,7 @@ class LlmClient {
                     }
                     if (!m.toolCallId.isNullOrBlank()) put("tool_call_id", m.toolCallId)
                     if (!m.name.isNullOrBlank()) put("name", m.name)
+                    m.extraContent?.let { put("extra_content", it) }
                     if (!m.toolCalls.isNullOrEmpty()) {
                         put("tool_calls", kotlinx.serialization.json.buildJsonArray {
                             for (call in m.toolCalls) {
@@ -349,6 +357,7 @@ class LlmClient {
         return ChatMessage(
             role = message.role,
             content = message.content.orEmpty(),
+            extraContent = message.extraContent,
             toolCalls = message.toolCalls.orEmpty().map { call ->
                 ToolCall(
                     id = call.id,
@@ -365,7 +374,8 @@ class LlmClient {
         settings: AppSettings,
         modelId: String,
         messages: List<ChatMessage>,
-        conversationId: String? = null
+        conversationId: String? = null,
+        onExtraContent: (JsonObject) -> Unit = {}
     ): Flow<String> = flow {
         val bodyText = buildRequestBody(
             provider = provider,
@@ -409,7 +419,10 @@ class LlmClient {
                         val chunk = runCatching {
                             json.decodeFromString(ChatChunk.serializer(), payload)
                         }.getOrNull() ?: continue
-                        val delta = chunk.choices.firstOrNull()?.delta?.content
+                        val choice = chunk.choices.firstOrNull()
+                        choice?.delta?.extraContent?.let(onExtraContent)
+                        choice?.message?.extraContent?.let(onExtraContent)
+                        val delta = choice?.delta?.content
                         if (!delta.isNullOrEmpty()) emit(delta)
                     }
                 } finally {
@@ -427,7 +440,9 @@ class LlmClient {
                 val parsed = runCatching {
                     json.decodeFromString(ChatResponse.serializer(), text)
                 }.getOrNull()
-                val content = parsed?.choices?.firstOrNull()?.message?.content
+                val message = parsed?.choices?.firstOrNull()?.message
+                message?.extraContent?.let(onExtraContent)
+                val content = message?.content
                 if (!content.isNullOrEmpty()) emit(content)
             }
         }
