@@ -188,4 +188,4 @@ class AgentLoopTest {
         assertTrue(result.userCancelled)
         assertTrue(result.finalMessage.content.contains("No further tools were executed"))
     }
-
+}
