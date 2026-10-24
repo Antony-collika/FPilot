@@ -2,9 +2,9 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, agent-fs, fix/provider-tool-call-compat, agent-fs-reliable-file-reading ]
+    branches: [ main, agent-fs, request-control-panel, fix/provider-tool-call-compat, agent-fs-reliable-file-reading ]
   pull_request:
-    branches: [ main, agent-fs ]
+    branches: [ main, agent-fs, request-control-panel ]
   workflow_dispatch:
 
 jobs:
