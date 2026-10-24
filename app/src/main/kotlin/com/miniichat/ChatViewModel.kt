@@ -16,6 +16,11 @@ import com.miniichat.data.Message
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderStore
 import com.miniichat.data.SettingsRepository
+import com.miniichat.data.ToolRound
+import com.miniichat.data.ToolRoundSettings
+import com.miniichat.data.buildToolRounds
+import com.miniichat.data.toolRoundsToChatMessages
+import com.miniichat.data.withTurnNumbers
 import com.miniichat.util.PromptVars
 import com.miniichat.util.newId
 import kotlinx.coroutines.CompletableDeferred
@@ -108,6 +113,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         largeFileReadCompletion?.complete(approved)
     }
 
+    /**
+     * Maps the name the model used to the internal tool id (uid).
+     * Today the two are identical. Once tool names become editable in the Request
+     * Control Panel, only this function has to change, and every safety check below
+     * keeps working because it compares the uid, never the name.
+     */
+    private fun toolUid(name: String): String = name
+
     private suspend fun confirmToolCall(
         call: ToolCall,
         arguments: JsonObject,
@@ -115,7 +128,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         workspaceRepository: SafFileRepository
     ): Boolean {
         val current = settings.value
-        if (call.name == "read_file") {
+        val uid = toolUid(call.name)
+        if (uid == "read_file") {
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
             // Approval applies to this file for the current agent run, including later chunks.
             if (path in permissionSession.approvedLargeReadPaths) return true
@@ -140,11 +154,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return true
             }
         }
-        val isWrite = call.name == "create_file" || call.name == "edit_file"
+        val isWrite = uid == "create_file" || uid == "edit_file"
         if (isWrite) {
             // These are hard safety gates, independent of the selected tool permission mode.
-            if (call.name == "create_file" && !current.allowWorkspaceCreate) return false
-            if (call.name == "edit_file" && !current.allowWorkspaceEdit) return false
+            if (uid == "create_file" && !current.allowWorkspaceCreate) return false
+            if (uid == "edit_file" && !current.allowWorkspaceEdit) return false
             val path = arguments["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val normalizedPath = path.trim().replace(92.toChar(), '/').trim('/')
             val pathSegments = normalizedPath.split('/')
@@ -152,7 +166,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val scope = current.workspaceWriteSubpath.trim().replace(92.toChar(), '/').trim('/')
             val scopeSegments = scope.split('/')
             if (scope.isNotBlank() && (scopeSegments.any { it.isBlank() || it == "." || it == ".." } || scope.contains(":") || !normalizedPath.startsWith("$scope/"))) return false
-            val proposedLength = if (call.name == "create_file") valueLength(arguments, "content") else valueLength(arguments, "replacement")
+            val proposedLength = if (uid == "create_file") valueLength(arguments, "content") else valueLength(arguments, "replacement")
             if (proposedLength > current.agentMaxWriteChars) return false
         }
 
@@ -170,7 +184,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return if (value.length > 500) value.take(500) + "…" else value
         }
         val path = value("path").ifBlank { value("query").ifBlank { "(no path)" } }
-        val summary = when (call.name) {
+        val summary = when (uid) {
             "create_file" -> "Create a Markdown file (${value("content").length} characters). Preview:\n${preview("content")}"
             "edit_file" -> "Replace one exact text occurrence. Target:\n${preview("target")}\nReplacement:\n${preview("replacement")}"
             "read_file" -> "Read file content. Path: $path"
@@ -377,20 +391,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val existing = store.snapshot().firstOrNull { it.id == activeId }
             val baseTitle = trimmed.take(30).replace("\n", " ")
 
+            // Old chats get their turn numbers here, once. The counter only goes up.
+            val baseConversation = (existing ?: Conversation(id = activeId, title = baseTitle, messages = emptyList()))
+                .withTurnNumbers()
+            val turnNo = baseConversation.nextTurnNo
+
             val userMsg = Message(
                 id = newId(),
                 role = "user",
                 content = trimmed,
-                attachments = attachments
+                attachments = attachments,
+                turnNo = turnNo
             )
             val assistantId = newId()
             val assistantPlaceholder = Message(id = assistantId, role = "assistant", content = "")
 
-            val updated = (existing ?: Conversation(id = activeId, title = baseTitle, messages = emptyList()))
+            val updated = baseConversation
                 .let { conv ->
                     conv.copy(
                         title = if (conv.messages.isEmpty()) baseTitle else conv.title,
                         messages = conv.messages + userMsg + assistantPlaceholder,
+                        nextTurnNo = turnNo + 1,
                         updatedAt = System.currentTimeMillis()
                     )
                 }
@@ -406,6 +427,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             updated.messages
                 .filter { !(it.role == "assistant" && it.content.isEmpty()) }
                 .forEach { msg ->
+                    // Tool rounds of finished turns come right before that turn's final answer.
+                    if (msg.role == "assistant" && msg.toolRounds.isNotEmpty()) {
+                        historyForApi.addAll(
+                            toolRoundsToChatMessages(msg.toolRounds, ToolRoundSettings.COMPACT_HISTORY)
+                        )
+                    }
                     val imgs = msg.attachments.filter { it.type == "image" }
                     if (msg.role == "user" && imgs.isNotEmpty()) {
                         // Build multipart content: text + image_url parts.
@@ -530,12 +557,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 confirmToolCall(call, arguments, permissionSession, repository)
                             }
                         )
+                        val initialCount = historyForApi.size
                         val result = agent.run(historyForApi)
                         builder.append(result.finalMessage.content)
                         _streamingOverlay.value = assistantId to builder.toString()
+                        // Everything the agent added after the first request messages, minus the final answer.
+                        val toolRounds = buildToolRounds(
+                            generated = result.transcript.drop(initialCount).dropLast(1),
+                            turnNo = turnNo
+                        )
                         appendAssistant(
                             activeId, assistantId, builder.toString(),
-                            result.finalMessage.extraContent
+                            result.finalMessage.extraContent,
+                            toolRounds
                         )
                     } else {
                         client.chatStream(
@@ -580,14 +614,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         convId: String,
         msgId: String,
         content: String,
-        extraContent: JsonObject? = null
+        extraContent: JsonObject? = null,
+        toolRounds: List<ToolRound>? = null
     ) {
         val list = store.snapshot()
         val conv = list.firstOrNull { it.id == convId } ?: return
         val newMsgs = conv.messages.map {
             if (it.id == msgId) {
-                if (extraContent != null) it.copy(content = content, extraContent = extraContent)
-                else it.copy(content = content)
+                var updatedMsg = it.copy(content = content)
+                if (extraContent != null) updatedMsg = updatedMsg.copy(extraContent = extraContent)
+                if (toolRounds != null) updatedMsg = updatedMsg.copy(toolRounds = toolRounds)
+                updatedMsg
             } else it
         }
         store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
@@ -601,7 +638,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val lastUserIdx = msgs.indexOfLast { it.role == "user" }
             if (lastUserIdx < 0) return@launch
             val lastUser = msgs[lastUserIdx]
-            val trimmed = msgs.subList(0, lastUserIdx + 1)
+            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
+            val trimmed = msgs.subList(0, lastUserIdx)
             store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
             sendMessage(lastUser.content, lastUser.attachments)
         }
@@ -617,7 +655,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (idx < 0) return@launch
             val target = msgs[idx]
             if (target.role != "user") return@launch
-            val trimmed = msgs.subList(0, idx + 1)
+            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
+            val trimmed = msgs.subList(0, idx)
             store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
             sendMessage(target.content, target.attachments)
         }
