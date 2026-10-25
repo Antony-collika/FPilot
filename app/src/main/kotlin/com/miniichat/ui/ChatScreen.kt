@@ -385,6 +385,15 @@ private fun UserBubble(
             modifier = Modifier.fillMaxWidth(0.82f),
             horizontalAlignment = Alignment.End
         ) {
+            // The number of this turn, so you can say "as in T4".
+            message.turnNo?.let { number ->
+                Text(
+                    "T$number",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(2.dp))
+            }
             if (message.attachments.isNotEmpty()) {
                 Column(
                     horizontalAlignment = Alignment.End,

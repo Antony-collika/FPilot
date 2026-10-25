@@ -14,6 +14,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -37,7 +38,20 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, HistoryManager }
+
+/** Like the normal file chooser, but also asks for permission to write (needed by the Memory file). */
+private class OpenDocumentReadWrite : ActivityResultContracts.OpenDocument() {
+    override fun createIntent(context: Context, input: Array<String>): Intent {
+        return super.createIntent(context, input).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,6 +120,36 @@ fun AppRoot(vm: ChatViewModel) {
         pickingCardId = null
     }
 
+    val memoryFilePicker = rememberLauncherForActivityResult(
+        contract = remember { OpenDocumentReadWrite() }
+    ) { uri ->
+        val cardId = pickingCardId
+        if (uri != null && cardId != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty().ifBlank { "Selected file" }
+            vm.setCardFile(cardId, uri.toString(), name)
+        }
+        pickingCardId = null
+    }
+
+    // The kind of template file being created ("tools", "memory" or "system").
+    var pendingTemplateKind by remember { mutableStateOf<String?>(null) }
+    val templateCreator = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        val kind = pendingTemplateKind
+        if (uri != null && kind != null) vm.createTemplate(kind, uri.toString())
+        pendingTemplateKind = null
+    }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var screen by rememberSaveable { mutableStateOf(Screen.Chat) }
@@ -126,6 +170,9 @@ fun AppRoot(vm: ChatViewModel) {
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.RequestPanel) {
         screen = Screen.Settings
+    }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.HistoryManager) {
+        screen = Screen.RequestPanel
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.ProviderEdit) {
         screen = Screen.Providers
@@ -272,7 +319,30 @@ fun AppRoot(vm: ChatViewModel) {
                         pickingCardId = cardId
                         cardFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
                     },
+                    onPickMemoryFile = { cardId ->
+                        pickingCardId = cardId
+                        memoryFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                    },
+                    onCreateTemplate = { kind ->
+                        pendingTemplateKind = kind
+                        templateCreator.launch("$kind.md")
+                    },
+                    onOpenHistoryManager = { screen = Screen.HistoryManager },
+                    checkMemory = { vm.memoryReferenceWarning() },
+                    makePreview = { vm.previewRequest() },
                     onReset = { vm.resetLayout() }
+                )
+            }
+            Screen.HistoryManager -> {
+                HistoryManagerScreen(
+                    conversation = activeConv,
+                    isBusy = isStreaming,
+                    onBack = { screen = Screen.RequestPanel },
+                    onEditMessage = { id, text -> vm.editMessage(id, text) },
+                    onDeleteMessage = { id -> vm.deleteMessage(id) },
+                    onDeleteTurn = { id -> vm.deleteTurn(id) },
+                    onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
+                    onEditToolResult = { id, round, result, text -> vm.editToolResult(id, round, result, text) }
                 )
             }
             Screen.Providers -> {
