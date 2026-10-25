@@ -23,7 +23,8 @@ object MarkdownFileTools {
         allowedWriteSubpath: String = "",
         enabledTools: Set<String> = ALL_TOOL_NAMES,
         maxChunkBytes: Int = 32_000,
-        confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxChunkBytes: Int) -> Boolean = { _, _, _ -> false }
+        confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxChunkBytes: Int) -> Boolean = { _, _, _ -> false },
+        exposed: List<com.miniichat.agent.ExposedTool>? = null
     ): AgentToolRegistry {
         val tools = mutableListOf<AgentTool>(
             ListFilesTool(repository), SearchFilesTool(repository), SearchContentTool(repository),
@@ -31,15 +32,11 @@ object MarkdownFileTools {
         )
         if (allowCreate) tools += CreateFileTool(repository, maxWriteChars, allowedWriteSubpath)
         if (allowEdit) tools += EditFileTool(repository, maxWriteChars, allowedWriteSubpath)
-        return AgentToolRegistry(tools.filter { it.definition.name in enabledTools })
+        return AgentToolRegistry(tools.filter { it.definition.name in enabledTools }, exposed)
     }
 
     private class ListFilesTool(private val files: SafFileRepository) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "list_files",
-            description = "List files and subdirectories in a path relative to the selected workspace.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path; empty means workspace root."}},"required":["path"],"additionalProperties":false}""")
-        )
+        override val definition = LIST_FILES_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
@@ -58,11 +55,7 @@ object MarkdownFileTools {
     }
 
     private class SearchFilesTool(private val files: SafFileRepository) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "search_files",
-            description = "Find files by case-insensitive name substring within the selected workspace.",
-            parameters = schema("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string","description":"Optional starting directory."},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false}""")
-        )
+        override val definition = SEARCH_FILES_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val query = arg(arguments, "query").trim()
@@ -90,11 +83,7 @@ object MarkdownFileTools {
     }
 
     private class SearchContentTool(private val files: SafFileRepository) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "search_content",
-            description = "Search text in Markdown files and return matching lines with relative file paths.",
-            parameters = schema("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string","description":"Optional starting directory."},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false}""")
-        )
+        override val definition = SEARCH_CONTENT_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val query = arg(arguments, "query")
@@ -131,11 +120,7 @@ object MarkdownFileTools {
         private val maxChunkBytes: Int,
         private val confirmLargeRead: suspend (path: String, sizeBytes: Long?, maxChunkBytes: Int) -> Boolean
     ) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "read_file",
-            description = "Read a bounded section of a UTF-8 text or Markdown file. Large files require user approval. Results explicitly report complete/partial status and a zero-based start_offset for continuing. Use start_line/end_line for line ranges.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_offset":{"type":"integer","minimum":0,"description":"Zero-based character offset for continuing a partial read; takes precedence over line arguments."},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
-        )
+        override val definition = READ_FILE_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
@@ -214,11 +199,7 @@ object MarkdownFileTools {
     }
 
     private class GetFileInfoTool(private val files: SafFileRepository) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "get_file_info",
-            description = "Get basic metadata for a file or directory in the selected workspace.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}""")
-        )
+        override val definition = GET_FILE_INFO_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
@@ -237,11 +218,7 @@ object MarkdownFileTools {
     }
 
     private class CreateFileTool(private val files: SafFileRepository, private val maxWriteChars: Int, private val allowedWriteSubpath: String) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "create_file",
-            description = "Create a new Markdown file. Refuses to overwrite an existing path.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}""")
-        )
+        override val definition = CREATE_FILE_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
@@ -260,11 +237,7 @@ object MarkdownFileTools {
     }
 
     private class EditFileTool(private val files: SafFileRepository, private val maxWriteChars: Int, private val allowedWriteSubpath: String) : AgentTool {
-        override val definition = ToolDefinition(
-            name = "edit_file",
-            description = "Replace one exact text occurrence in a Markdown file. Stops if the target is missing or ambiguous.",
-            parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"target":{"type":"string"},"replacement":{"type":"string"}},"required":["path","target","replacement"],"additionalProperties":false}""")
-        )
+        override val definition = EDIT_FILE_DEFINITION
 
         override suspend fun execute(arguments: JsonObject): String {
             val path = arg(arguments, "path")
@@ -302,6 +275,59 @@ object MarkdownFileTools {
             return "Edited and verified $path."
         }
     }
+
+    private val LIST_FILES_DEFINITION = ToolDefinition(
+        name = "list_files",
+        description = "List files and subdirectories in a path relative to the selected workspace.",
+        parameters = schema("""{"type":"object","properties":{"path":{"type":"string","description":"Relative directory path; empty means workspace root."}},"required":["path"],"additionalProperties":false}""")
+    )
+
+    private val SEARCH_FILES_DEFINITION = ToolDefinition(
+        name = "search_files",
+        description = "Find files by case-insensitive name substring within the selected workspace.",
+        parameters = schema("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string","description":"Optional starting directory."},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false}""")
+    )
+
+    private val SEARCH_CONTENT_DEFINITION = ToolDefinition(
+        name = "search_content",
+        description = "Search text in Markdown files and return matching lines with relative file paths.",
+        parameters = schema("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string","description":"Optional starting directory."},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["query"],"additionalProperties":false}""")
+    )
+
+    private val READ_FILE_DEFINITION = ToolDefinition(
+        name = "read_file",
+        description = "Read a bounded section of a UTF-8 text or Markdown file. Large files require user approval. Results explicitly report complete/partial status and a zero-based start_offset for continuing. Use start_line/end_line for line ranges.",
+        parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"start_offset":{"type":"integer","minimum":0,"description":"Zero-based character offset for continuing a partial read; takes precedence over line arguments."},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}""")
+    )
+
+    private val GET_FILE_INFO_DEFINITION = ToolDefinition(
+        name = "get_file_info",
+        description = "Get basic metadata for a file or directory in the selected workspace.",
+        parameters = schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}""")
+    )
+
+    private val CREATE_FILE_DEFINITION = ToolDefinition(
+        name = "create_file",
+        description = "Create a new Markdown file. Refuses to overwrite an existing path.",
+        parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}""")
+    )
+
+    private val EDIT_FILE_DEFINITION = ToolDefinition(
+        name = "edit_file",
+        description = "Replace one exact text occurrence in a Markdown file. Stops if the target is missing or ambiguous.",
+        parameters = schema("""{"type":"object","properties":{"path":{"type":"string"},"target":{"type":"string"},"replacement":{"type":"string"}},"required":["path","target","replacement"],"additionalProperties":false}""")
+    )
+
+    /** The definitions of all seven tools, in the order they are normally offered. */
+    fun allDefinitions(): List<ToolDefinition> = listOf(
+        LIST_FILES_DEFINITION,
+        SEARCH_FILES_DEFINITION,
+        SEARCH_CONTENT_DEFINITION,
+        READ_FILE_DEFINITION,
+        GET_FILE_INFO_DEFINITION,
+        CREATE_FILE_DEFINITION,
+        EDIT_FILE_DEFINITION
+    )
 
     val ALL_TOOL_NAMES = setOf("list_files", "search_files", "search_content", "read_file", "get_file_info", "create_file", "edit_file")
 

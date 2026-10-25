@@ -132,7 +132,7 @@ class SafFileRepository(
         }
         render(nodes, "")
         val status = if (complete) "true" else "false"
-        return "[TREE depth=$depthLimit, verified=$status]\n" +
+        return "[TREE verified=$status]\n" +
             lines.joinToString("\n") + "\n[/TREE]"
     }
 
