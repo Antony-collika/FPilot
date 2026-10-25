@@ -37,7 +37,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +87,25 @@ fun AppRoot(vm: ChatViewModel) {
         }
     }
 
+    // The card whose file is being chosen in the Request Control Panel.
+    var pickingCardId by remember { mutableStateOf<String?>(null) }
+    val cardFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val cardId = pickingCardId
+        if (uri != null && cardId != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty().ifBlank { "Selected file" }
+            vm.setCardFile(cardId, uri.toString(), name)
+        }
+        pickingCardId = null
+    }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var screen by rememberSaveable { mutableStateOf(Screen.Chat) }
@@ -103,6 +122,9 @@ fun AppRoot(vm: ChatViewModel) {
         screen = Screen.Chat
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Providers) {
+        screen = Screen.Settings
+    }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.RequestPanel) {
         screen = Screen.Settings
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.ProviderEdit) {
@@ -124,6 +146,7 @@ fun AppRoot(vm: ChatViewModel) {
     val pendingToolApproval by vm.pendingToolApproval.collectAsState()
     val pendingLargeFileRead by vm.pendingLargeFileRead.collectAsState()
     val llmRequestLogs by vm.llmRequestLogs.collectAsState()
+    val requestLayout by vm.requestLayout.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -232,7 +255,24 @@ fun AppRoot(vm: ChatViewModel) {
                     onClearWorkspace = { vm.setWorkspace(null) },
                     onOpenProviders = { screen = Screen.Providers },
                     onChooseSystemPromptFile = { systemPromptFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
-                    onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) }
+                    onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
+                    onOpenRequestPanel = { screen = Screen.RequestPanel }
+                )
+            }
+            Screen.RequestPanel -> {
+                RequestPanelScreen(
+                    layout = requestLayout,
+                    settings = settings,
+                    hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
+                    historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
+                    onBack = { screen = Screen.Settings },
+                    onLayoutChange = { vm.saveLayout(it) },
+                    onSettingsChange = { vm.updateSettings(it) },
+                    onPickFile = { cardId ->
+                        pickingCardId = cardId
+                        cardFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                    },
+                    onReset = { vm.resetLayout() }
                 )
             }
             Screen.Providers -> {

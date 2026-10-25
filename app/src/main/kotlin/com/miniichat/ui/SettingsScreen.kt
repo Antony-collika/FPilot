@@ -64,7 +64,8 @@ fun SettingsScreen(
     onClearWorkspace: () -> Unit,
     onOpenProviders: () -> Unit,
     onChooseSystemPromptFile: () -> Unit,
-    onChooseSkillsFile: () -> Unit
+    onChooseSkillsFile: () -> Unit,
+    onOpenRequestPanel: () -> Unit
 ) {
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
     var settingsSubScreen by rememberSaveable { mutableStateOf("main") }
@@ -361,17 +362,14 @@ fun SettingsScreen(
                 SectionCard {
                     SettingsNavigationRow("Tool permissions", "Configure access to seven file tools", Icons.Default.Storage) { settingsSubScreen = "permissions" }
                 }
-                SectionCard {
-                    SettingsNavigationRow("Directory tree", if (settings.directoryTreeEnabled) "Included in request · depth ${settings.directoryTreeDepth}" else "Optional folder context for requests", Icons.Default.Storage) { settingsSubScreen = "tree" }
-                }
             // Behavior entry
-            SectionHeader(stringResource(R.string.section_behavior))
+            SectionHeader("Request")
             SectionCard {
                 SettingsNavigationRow(
-                    "Behavior",
-                    "System prompt, Skills, temperature and streaming",
+                    "Request Control Panel",
+                    "Cards sent to the model: system prompt, directory tree, history, temperature, streaming",
                     Icons.Default.Storage
-                ) { settingsSubScreen = "behavior" }
+                ) { onOpenRequestPanel() }
             }
 
             // Providers entry
