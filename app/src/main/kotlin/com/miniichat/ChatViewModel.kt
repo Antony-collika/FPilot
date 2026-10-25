@@ -16,10 +16,13 @@ import com.miniichat.data.Message
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderStore
 import com.miniichat.data.SettingsRepository
+import com.miniichat.data.RequestBuilder
+import com.miniichat.data.RequestLayout
+import com.miniichat.data.RequestLayoutStore
 import com.miniichat.data.ToolRound
-import com.miniichat.data.ToolRoundSettings
 import com.miniichat.data.buildToolRounds
-import com.miniichat.data.toolRoundsToChatMessages
+import com.miniichat.data.defaultLayout
+import com.miniichat.data.layoutFromSettings
 import com.miniichat.data.withTurnNumbers
 import com.miniichat.util.PromptVars
 import com.miniichat.util.newId
@@ -29,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,6 +64,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     val settings: StateFlow<AppSettings> = settingsRepo.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
+    private val layoutStore = RequestLayoutStore(app)
+    private val storedLayout: StateFlow<RequestLayout?> = layoutStore.layoutFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The cards of the Request Control Panel. Until the user saves a change, they are
+     *  built from the old Settings so the request stays exactly as it was. */
+    val requestLayout: StateFlow<RequestLayout> = combine(storedLayout, settings) { stored, s ->
+        stored ?: layoutFromSettings(s)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, layoutFromSettings(AppSettings()))
 
     val providers: StateFlow<List<ProviderConfig>> = providerStore.providersFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -358,34 +372,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val temperature = current.temperature
 
         viewModelScope.launch {
-            val systemPromptRaw = try {
-                if (current.systemPromptSource == "file") {
-                    readPromptFile(current.systemPromptFileUri, "System prompt")
-                } else {
-                    current.systemPrompt
-                }
-            } catch (e: Exception) {
-                _error.value = e.message ?: "Could not read the system prompt source."
-                return@launch
+            val layout = effectiveLayout()
+            val workspaceRepository = if (current.workspaceTreeUri.isNotBlank()) {
+                SafFileRepository(
+                    getApplication<android.app.Application>().contentResolver,
+                    android.net.Uri.parse(current.workspaceTreeUri)
+                )
+            } else {
+                null
             }
-            val skillsContent = if (current.skillsEnabled) {
-                try {
-                    if (current.skillsSource == "file") {
-                        readPromptFile(current.skillsFileUri, "Skills")
-                    } else {
-                        current.skillsText
-                    }
-                } catch (e: Exception) {
-                    _error.value = e.message ?: "Could not read the Skills source."
-                    return@launch
-                }
-            } else ""
-            val systemPrompt = PromptVars.render(
-                template = systemPromptRaw,
-                model = model,
-                provider = provider.name,
-                assistant = ""
-            )
 
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
             val existing = store.snapshot().firstOrNull { it.id == activeId }
@@ -415,74 +410,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         updatedAt = System.currentTimeMillis()
                     )
                 }
-            store.upsert(updated)
 
-            val historyForApi = mutableListOf<ChatMessage>()
-            if (systemPrompt.isNotBlank()) {
-                historyForApi.add(ChatMessage("system", systemPrompt))
-            }
-            if (skillsContent.isNotBlank()) {
-                historyForApi.add(ChatMessage("system", "[SKILLS]\n$skillsContent\n[/SKILLS]"))
-            }
-            updated.messages
-                .filter { !(it.role == "assistant" && it.content.isEmpty()) }
-                .forEach { msg ->
-                    // Tool rounds of finished turns come right before that turn's final answer.
-                    if (msg.role == "assistant" && msg.toolRounds.isNotEmpty()) {
-                        historyForApi.addAll(
-                            toolRoundsToChatMessages(msg.toolRounds, ToolRoundSettings.COMPACT_HISTORY)
-                        )
-                    }
-                    val imgs = msg.attachments.filter { it.type == "image" }
-                    if (msg.role == "user" && imgs.isNotEmpty()) {
-                        // Build multipart content: text + image_url parts.
-                        val parts = mutableListOf<com.miniichat.api.ChatPart>()
-                        if (msg.content.isNotBlank()) {
-                            parts.add(com.miniichat.api.ChatPart(type = "text", text = msg.content))
-                        }
-                        for (att in imgs) {
-                            // Try to load + base64-encode the image. Fall back silently if it fails.
-                            val loaded = runCatching {
-                                com.miniichat.util.AttachmentLoader.load(
-                                    resolver = getApplication<android.app.Application>().contentResolver,
-                                    uri = android.net.Uri.parse(att.uri),
-                                    mimeFallback = att.mimeType.ifBlank { "image/jpeg" }
-                                )
-                            }.getOrNull() ?: continue
-                            val dataUrl = "data:${loaded.mimeType};base64,${loaded.base64}"
-                            parts.add(com.miniichat.api.ChatPart(
-                                type = "image_url",
-                                imageUrl = com.miniichat.api.ChatPart.ImageUrl(url = dataUrl)
-                            ))
-                        }
-                        // Also describe non-image attachments as text references.
-                        val others = msg.attachments.filter { it.type != "image" }
-                        if (others.isNotEmpty()) {
-                            val tail = others.joinToString("\n") { "[file: ${it.name} (${it.mimeType})]" }
-                            val merged = if (parts.firstOrNull()?.type == "text") {
-                                parts[0] = com.miniichat.api.ChatPart(
-                                    type = "text",
-                                    text = (parts[0].text ?: "") + "\n\n" + tail
-                                )
-                                parts
-                            } else {
-                                listOf(com.miniichat.api.ChatPart(type = "text", text = tail)) + parts
+            // The request is built from the cards of the Request Control Panel.
+            val requestBuilder = RequestBuilder(
+                readFile = { uri, label -> readPromptFile(uri, label) },
+                directoryTree = { depth ->
+                    workspaceRepository?.let { repository ->
+                        runCatching { repository.directoryTree(depth) }
+                            .getOrElse {
+                                "[WORKSPACE PATH RULE]\n" +
+                                    "All file-tool paths are relative to the selected workspace root. The root folder name is display-only; do not prepend it to tool paths. Use an empty path for the workspace root directory.\n" +
+                                    "[/WORKSPACE PATH RULE]\n" +
+                                    "[TREE depth=${depth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
                             }
-                            historyForApi.add(ChatMessage(msg.role, msg.content, merged, extraContent = msg.extraContent))
-                        } else {
-                            historyForApi.add(ChatMessage(msg.role, msg.content, parts, extraContent = msg.extraContent))
-                        }
-                    } else if (msg.role == "user" && msg.attachments.isNotEmpty()) {
-                        // Files only — describe inline as text refs.
-                        val refs = msg.attachments.joinToString("\n") {
-                            "[file: ${it.name} (${it.mimeType})]"
-                        }
-                        val combined = if (msg.content.isBlank()) refs else "${msg.content}\n\n$refs"
-                        historyForApi.add(ChatMessage(msg.role, combined, extraContent = msg.extraContent))
-                    } else {
-                        historyForApi.add(ChatMessage(msg.role, msg.content, extraContent = msg.extraContent))
                     }
-                }
+                },
+                renderVars = { template ->
+                    PromptVars.render(
+                        template = template,
+                        model = model,
+                        provider = provider.name,
+                        assistant = ""
+                    )
+                },
+                mapMessage = { message -> toChatMessage(message) }
+            )
+            val historyForApi: MutableList<ChatMessage> = try {
+                requestBuilder.build(layout, updated.messages).toMutableList()
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Could not build the request."
+                return@launch
+            }
+            // Only now, when the request is valid, the new message is saved.
+            store.upsert(updated)
 
             _isStreaming.value = true
             val builder = StringBuilder()
@@ -496,23 +456,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val flushIntervalMs = 250L
                 _streamingOverlay.value = assistantId to ""
                 try {
-                    if (current.workspaceTreeUri.isNotBlank()) {
-                        val treeUri = android.net.Uri.parse(current.workspaceTreeUri)
-                        val repository = SafFileRepository(
-                            getApplication<android.app.Application>().contentResolver,
-                            treeUri
-                        )
-                        if (current.directoryTreeEnabled) {
-                            val tree = runCatching { repository.directoryTree(current.directoryTreeDepth) }
-                                .getOrElse {
-                                    "[WORKSPACE PATH RULE]\n" +
-                                        "All file-tool paths are relative to the selected workspace root. The root folder name is display-only; do not prepend it to tool paths. Use an empty path for the workspace root directory.\n" +
-                                        "[/WORKSPACE PATH RULE]\n" +
-                                        "[TREE depth=${current.directoryTreeDepth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
-                                }
-                            val treeIndex = if (systemPrompt.isNotBlank()) 1 else 0
-                            historyForApi.add(treeIndex.coerceAtMost(historyForApi.size), ChatMessage("system", tree))
-                        }
+                    if (workspaceRepository != null) {
+                        val repository = workspaceRepository
                         val enabledTools = buildSet {
                             if (current.toolListFilesEnabled) add("list_files")
                             if (current.toolSearchFilesEnabled) add("search_files")
@@ -682,6 +627,77 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
         }
+    }
+
+    /** The cards in use: the saved ones, or the ones built from the old Settings. */
+    private suspend fun effectiveLayout(): RequestLayout =
+        layoutStore.snapshot() ?: layoutFromSettings(settings.value)
+
+    fun saveLayout(layout: RequestLayout) {
+        viewModelScope.launch { layoutStore.save(layout) }
+    }
+
+    fun resetLayout() {
+        viewModelScope.launch { layoutStore.save(defaultLayout { newId() }) }
+    }
+
+    fun setCardFile(cardId: String, uri: String, name: String) {
+        viewModelScope.launch {
+            val cards = effectiveLayout().cards.map {
+                if (it.id == cardId) it.copy(source = "file", fileUri = uri, fileName = name) else it
+            }
+            layoutStore.save(RequestLayout(cards))
+        }
+    }
+
+    /** Converts one stored chat message (text, images, files) into a request message. */
+    private fun toChatMessage(msg: Message): ChatMessage {
+        val imgs = msg.attachments.filter { it.type == "image" }
+        if (msg.role == "user" && imgs.isNotEmpty()) {
+            // Build multipart content: text + image_url parts.
+            val parts = mutableListOf<com.miniichat.api.ChatPart>()
+            if (msg.content.isNotBlank()) {
+                parts.add(com.miniichat.api.ChatPart(type = "text", text = msg.content))
+            }
+            for (att in imgs) {
+                // Try to load + base64-encode the image. Skip it silently if it fails.
+                val loaded = runCatching {
+                    com.miniichat.util.AttachmentLoader.load(
+                        resolver = getApplication<android.app.Application>().contentResolver,
+                        uri = android.net.Uri.parse(att.uri),
+                        mimeFallback = att.mimeType.ifBlank { "image/jpeg" }
+                    )
+                }.getOrNull() ?: continue
+                val dataUrl = "data:${loaded.mimeType};base64,${loaded.base64}"
+                parts.add(com.miniichat.api.ChatPart(
+                    type = "image_url",
+                    imageUrl = com.miniichat.api.ChatPart.ImageUrl(url = dataUrl)
+                ))
+            }
+            // Also describe non-image attachments as text references.
+            val others = msg.attachments.filter { it.type != "image" }
+            if (others.isNotEmpty()) {
+                val tail = others.joinToString("\n") { "[file: ${it.name} (${it.mimeType})]" }
+                val merged = if (parts.firstOrNull()?.type == "text") {
+                    parts[0] = com.miniichat.api.ChatPart(
+                        type = "text",
+                        text = (parts[0].text ?: "") + "\n\n" + tail
+                    )
+                    parts
+                } else {
+                    listOf(com.miniichat.api.ChatPart(type = "text", text = tail)) + parts
+                }
+                return ChatMessage(msg.role, msg.content, merged, extraContent = msg.extraContent)
+            }
+            return ChatMessage(msg.role, msg.content, parts, extraContent = msg.extraContent)
+        }
+        if (msg.role == "user" && msg.attachments.isNotEmpty()) {
+            // Files only: describe inline as text refs.
+            val refs = msg.attachments.joinToString("\n") { "[file: ${it.name} (${it.mimeType})]" }
+            val combined = if (msg.content.isBlank()) refs else "${msg.content}\n\n$refs"
+            return ChatMessage(msg.role, combined, extraContent = msg.extraContent)
+        }
+        return ChatMessage(msg.role, msg.content, extraContent = msg.extraContent)
     }
 
     private suspend fun readPromptFile(uri: String, label: String): String = withContext(Dispatchers.IO) {
