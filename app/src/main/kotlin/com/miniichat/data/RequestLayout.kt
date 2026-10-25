@@ -10,6 +10,8 @@ object CardRole {
     const val DIRECTORY_TREE = "directory_tree"
     const val HISTORY = "history"
     const val LAST_TURN = "last_turn"
+    const val TOOLS = "tools"
+    const val MEMORY = "memory"
 
     /** Cards that always exist and can be neither deleted nor switched off. */
     val FIXED = setOf(METADATA, HISTORY, LAST_TURN)
@@ -22,6 +24,11 @@ object CardRole {
  * - [source]: "text" (typed in the app) or "file" (a file chosen on the phone).
  * - [wrapTag]: if set, the text is sent as [TAG] ... [/TAG].
  * - [treeDepth]: how deep the directory tree scan goes (Directory Tree card only).
+ * - [historyCompact]: History card only. true = old tool results are sent as a short note.
+ * - [turnIdEnabled]: History card only. true = user messages start with a tag such as [T7].
+ *
+ * The role name for a Directory Tree card is [roleLabel] (new cards use "Directory tree").
+ * For a Memory card, [roleLabel] is "system" or "user". [fileUri] is the Memory file.
  */
 @Serializable
 data class RequestCard(
@@ -35,7 +42,9 @@ data class RequestCard(
     val fileUri: String = "",
     val fileName: String = "",
     val wrapTag: String = "",
-    val treeDepth: Int = 2
+    val treeDepth: Int = 2,
+    val historyCompact: Boolean = true,
+    val turnIdEnabled: Boolean = false
 )
 
 @Serializable
@@ -51,6 +60,8 @@ fun RequestCard.displayName(): String {
         CardRole.DIRECTORY_TREE -> "Directory Tree"
         CardRole.HISTORY -> "History"
         CardRole.LAST_TURN -> "Last turn"
+        CardRole.TOOLS -> "Tools"
+        CardRole.MEMORY -> "Memory"
         else -> role
     }
 }
@@ -67,6 +78,8 @@ fun RequestLayout.validationError(): String? {
         val count = cards.count { it.role == role }
         if (count != 1) return "The request needs exactly one ${role.replace('_', ' ')} card, but has $count."
     }
+    if (cards.count { it.role == CardRole.TOOLS } > 1) return "Only one Tools card is allowed."
+    if (cards.count { it.role == CardRole.MEMORY } > 1) return "Only one Memory card is allowed."
     val historyIndex = cards.indexOfFirst { it.role == CardRole.HISTORY }
     val lastTurnIndex = cards.indexOfFirst { it.role == CardRole.LAST_TURN }
     if (historyIndex > lastTurnIndex) return "The History card must be above the Last turn card."
@@ -106,6 +119,7 @@ fun layoutFromSettings(s: AppSettings): RequestLayout {
         cards += RequestCard(
             id = "legacy-tree",
             role = CardRole.DIRECTORY_TREE,
+            roleLabel = DIRECTORY_TREE_ROLE,
             treeDepth = s.directoryTreeDepth.coerceIn(1, 8)
         )
     }
@@ -126,10 +140,13 @@ fun layoutFromSettings(s: AppSettings): RequestLayout {
     return RequestLayout(cards)
 }
 
-/** Where a newly added card goes: system and free cards above History, a tree above Last turn. */
+/** The role name the Directory Tree card sends to the model unless the user changes it. */
+const val DIRECTORY_TREE_ROLE = "Directory tree"
+
+/** Where a newly added card goes: system, free and Tools cards above History; tree and Memory above Last turn. */
 fun RequestLayout.insertionIndexFor(role: String): Int {
     val target = when (role) {
-        CardRole.DIRECTORY_TREE -> CardRole.LAST_TURN
+        CardRole.DIRECTORY_TREE, CardRole.MEMORY -> CardRole.LAST_TURN
         else -> CardRole.HISTORY
     }
     val index = cards.indexOfFirst { it.role == target }

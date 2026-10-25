@@ -158,3 +158,22 @@ fun Conversation.withTurnNumbers(): Conversation {
     }
     return copy(messages = numbered, nextTurnNo = next)
 }
+
+/**
+ * Returns this result with a new text. The short note is made again from the new text
+ * (used only when the user edits a tool result by hand).
+ */
+fun StoredToolResult.withContent(newContent: String, arguments: String?, turnNo: Int?): StoredToolResult {
+    val limit = ToolRoundSettings.MAX_STORED_RESULT_CHARS
+    val stored = if (newContent.length > limit) {
+        newContent.take(limit) + "\n[...cut when saving: ${newContent.length - limit} more characters]"
+    } else {
+        newContent
+    }
+    val compact = if (newContent.length >= ToolRoundSettings.COMPACT_MIN_CHARS) {
+        compactStub(name, arguments, newContent.length, turnNo)
+    } else {
+        null
+    }
+    return copy(content = stored, compact = compact)
+}
