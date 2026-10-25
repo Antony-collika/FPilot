@@ -7,6 +7,8 @@ import com.miniichat.api.ChatMessage
 import com.miniichat.api.LlmClient
 import com.miniichat.api.ToolCall
 import com.miniichat.agent.AgentLoop
+import com.miniichat.agent.ExposedTool
+import com.miniichat.api.ToolDefinition
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.data.AppSettings
@@ -16,7 +18,17 @@ import com.miniichat.data.Message
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderStore
 import com.miniichat.data.SettingsRepository
+import com.miniichat.data.CardRole
+import com.miniichat.data.MemoryDoc
+import com.miniichat.data.MemoryPatch
+import com.miniichat.data.RequestBuildException
 import com.miniichat.data.RequestBuilder
+import com.miniichat.data.RequestCard
+import com.miniichat.data.ToolExposureSpec
+import com.miniichat.data.ToolsCardException
+import com.miniichat.data.ToolsCardFormat
+import com.miniichat.data.displayName
+import com.miniichat.data.withContent
 import com.miniichat.data.RequestLayout
 import com.miniichat.data.RequestLayoutStore
 import com.miniichat.data.ToolRound
@@ -41,6 +53,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+
+/** How the model gets its tools for one request. mode: "legacy" (no Tools card), "custom" (Tools card), "none" (card switched off). */
+private class ToolsSetup(
+    val mode: String,
+    val exposed: List<ExposedTool>?,
+    val nameToUid: Map<String, String>,
+    val specs: List<ToolExposureSpec>
+)
 
 data class ToolApprovalRequest(val toolName: String, val path: String, val summary: String)
 data class LargeFileReadRequest(val path: String, val sizeBytes: Long?, val maxChunkBytes: Int)
@@ -127,13 +147,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         largeFileReadCompletion?.complete(approved)
     }
 
+    /** name the model sees -> internal tool id (uid), for the request that is running now. */
+    private var toolNameToUid: Map<String, String> = emptyMap()
+
     /**
-     * Maps the name the model used to the internal tool id (uid).
-     * Today the two are identical. Once tool names become editable in the Request
-     * Control Panel, only this function has to change, and every safety check below
-     * keeps working because it compares the uid, never the name.
+     * Maps the name the model used to the internal tool id (uid). Every safety check
+     * below compares the uid, never the name, so renaming a tool in the Tools card
+     * cannot bypass them.
      */
-    private fun toolUid(name: String): String = name
+    private fun toolUid(name: String): String = toolNameToUid[name] ?: name
 
     private suspend fun confirmToolCall(
         call: ToolCall,
@@ -373,14 +395,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             val layout = effectiveLayout()
-            val workspaceRepository = if (current.workspaceTreeUri.isNotBlank()) {
-                SafFileRepository(
-                    getApplication<android.app.Application>().contentResolver,
-                    android.net.Uri.parse(current.workspaceTreeUri)
-                )
-            } else {
-                null
+            val workspaceRepository = workspaceRepositoryFor(current)
+            val toolsSetup = try {
+                resolveTools(layout, workspaceRepository != null)
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Could not read the Tools card."
+                return@launch
             }
+            val memoryCard = layout.cards.firstOrNull { it.role == CardRole.MEMORY && it.enabled }
+            // While an answer arrives, the memory patch block is not shown.
+            fun shown(text: String): String =
+                if (memoryCard != null) MemoryPatch.hideForDisplay(text) else text
 
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
             val existing = store.snapshot().firstOrNull { it.id == activeId }
@@ -412,29 +437,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
             // The request is built from the cards of the Request Control Panel.
-            val requestBuilder = RequestBuilder(
-                readFile = { uri, label -> readPromptFile(uri, label) },
-                directoryTree = { depth ->
-                    workspaceRepository?.let { repository ->
-                        runCatching { repository.directoryTree(depth) }
-                            .getOrElse {
-                                "[WORKSPACE PATH RULE]\n" +
-                                    "All file-tool paths are relative to the selected workspace root. The root folder name is display-only; do not prepend it to tool paths. Use an empty path for the workspace root directory.\n" +
-                                    "[/WORKSPACE PATH RULE]\n" +
-                                    "[TREE depth=${depth.coerceIn(1, 8)}, verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]"
-                            }
-                    }
-                },
-                renderVars = { template ->
-                    PromptVars.render(
-                        template = template,
-                        model = model,
-                        provider = provider.name,
-                        assistant = ""
-                    )
-                },
-                mapMessage = { message -> toChatMessage(message) }
-            )
+            val requestBuilder = makeRequestBuilder(workspaceRepository, model, provider.name)
             val historyForApi: MutableList<ChatMessage> = try {
                 requestBuilder.build(layout, updated.messages).toMutableList()
             } catch (e: Exception) {
@@ -456,7 +459,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val flushIntervalMs = 250L
                 _streamingOverlay.value = assistantId to ""
                 try {
-                    if (workspaceRepository != null) {
+                    if (workspaceRepository != null && toolsSetup.mode != "none") {
                         val repository = workspaceRepository
                         val enabledTools = buildSet {
                             if (current.toolListFilesEnabled) add("list_files")
@@ -477,6 +480,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 allowedWriteSubpath = current.workspaceWriteSubpath,
                                 enabledTools = enabledTools,
                                 maxChunkBytes = current.agentMaxFileReadKb * 1_000,
+                                exposed = toolsSetup.exposed,
                                 confirmLargeRead = { path, sizeBytes, limit ->
                                     if (path in permissionSession.approvedLargeReadPaths) {
                                         true
@@ -502,9 +506,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 confirmToolCall(call, arguments, permissionSession, repository)
                             }
                         )
+                        toolNameToUid = toolsSetup.nameToUid
                         val initialCount = historyForApi.size
                         val result = agent.run(historyForApi)
-                        builder.append(result.finalMessage.content)
+                        // A memory patch in the answer is applied to the Memory file and removed from the text.
+                        builder.append(handleMemoryPatch(memoryCard, result.finalMessage.content))
                         _streamingOverlay.value = assistantId to builder.toString()
                         // Everything the agent added after the first request messages, minus the final answer.
                         val toolRounds = buildToolRounds(
@@ -528,14 +534,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             .collect { delta ->
                                 builder.append(delta)
                                 // 1) update in-memory overlay every token (no IO)
-                                _streamingOverlay.value = assistantId to builder.toString()
+                                _streamingOverlay.value = assistantId to shown(builder.toString())
                                 // 2) throttled DataStore flush
                                 val now = System.currentTimeMillis()
                                 if (now - lastFlush >= flushIntervalMs) {
-                                    appendAssistant(activeId, assistantId, builder.toString())
+                                    appendAssistant(activeId, assistantId, shown(builder.toString()))
                                     lastFlush = now
                                 }
                             }
+                        val processed = handleMemoryPatch(memoryCard, builder.toString())
+                        if (processed != builder.toString()) {
+                            builder.clear()
+                            builder.append(processed)
+                            _streamingOverlay.value = assistantId to processed
+                        }
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
@@ -545,7 +557,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     appendAssistant(activeId, assistantId, builder.toString())
                 } finally {
                     if (builder.isNotEmpty()) {
-                        appendAssistant(activeId, assistantId, builder.toString(), streamExtraContent)
+                        appendAssistant(activeId, assistantId, shown(builder.toString()), streamExtraContent)
                     }
                     _streamingOverlay.value = null
                     _isStreaming.value = false
@@ -609,6 +621,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Delete a single message in the current conversation. */
     fun deleteMessage(messageId: String) {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
@@ -619,6 +632,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Edit a message's text content (no resend). */
     fun editMessage(messageId: String, newContent: String) {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
@@ -626,6 +640,247 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (it.id == messageId) it.copy(content = newContent) else it
             }
             store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    private fun workspaceRepositoryFor(current: AppSettings): SafFileRepository? =
+        if (current.workspaceTreeUri.isNotBlank()) {
+            SafFileRepository(
+                getApplication<android.app.Application>().contentResolver,
+                android.net.Uri.parse(current.workspaceTreeUri)
+            )
+        } else {
+            null
+        }
+
+    /** Reads the Tools card (if any) and decides which tools the model gets. */
+    private suspend fun resolveTools(layout: RequestLayout, hasWorkspace: Boolean): ToolsSetup {
+        val card = layout.cards.firstOrNull { it.role == CardRole.TOOLS }
+            ?: return ToolsSetup("legacy", null, emptyMap(), emptyList())
+        if (!card.enabled) return ToolsSetup("none", null, emptyMap(), emptyList())
+        if (!hasWorkspace) {
+            throw RequestBuildException(
+                "The \"${card.displayName()}\" card needs a workspace folder. Choose one in Settings, or switch this card off."
+            )
+        }
+        val text = if (card.source == "file") readPromptFile(card.fileUri, card.displayName()) else card.text
+        val specs = try {
+            ToolsCardFormat.parse(text, MarkdownFileTools.ALL_TOOL_NAMES)
+        } catch (e: ToolsCardException) {
+            throw RequestBuildException("The \"${card.displayName()}\" card has a problem: ${e.message}")
+        }
+        val baseByName = MarkdownFileTools.allDefinitions().associateBy { it.name }
+        val exposed = specs.map { spec ->
+            ExposedTool(
+                uid = spec.uid,
+                name = spec.name,
+                definition = ToolDefinition(spec.name, spec.description, baseByName.getValue(spec.uid).parameters)
+            )
+        }
+        return ToolsSetup("custom", exposed, specs.associate { it.name to it.uid }, specs)
+    }
+
+    private fun makeRequestBuilder(
+        workspaceRepository: SafFileRepository?,
+        model: String,
+        providerName: String
+    ): RequestBuilder = RequestBuilder(
+        readFile = { uri, label -> readPromptFile(uri, label) },
+        directoryTree = { depth ->
+            workspaceRepository?.let { repository ->
+                runCatching { repository.directoryTree(depth) }
+                    .getOrElse { "[TREE verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]" }
+            }
+        },
+        renderVars = { template ->
+            PromptVars.render(template = template, model = model, provider = providerName, assistant = "")
+        },
+        mapMessage = { message -> toChatMessage(message) }
+    )
+
+    /**
+     * If the answer contains a memory patch block, applies it to the Memory file and returns
+     * the answer without the block. If anything is wrong, the file is left untouched.
+     */
+    private suspend fun handleMemoryPatch(card: RequestCard?, answer: String): String {
+        if (card == null) return answer
+        val split = MemoryPatch.split(answer)
+        val patch = split.patch
+        if (patch == null) {
+            if (split.incomplete) _toast.value = "Memory not updated: the patch block was not closed."
+            return split.visible
+        }
+        try {
+            withContext(Dispatchers.IO) {
+                val resolver = getApplication<Application>().contentResolver
+                val uri = android.net.Uri.parse(card.fileUri)
+                val currentText = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("Could not open the Memory file.")
+                val updated = MemoryDoc.parse(currentText).applyPatch(patch).render()
+                val output = resolver.openOutputStream(uri, "wt")
+                    ?: throw IllegalStateException("Could not write the Memory file.")
+                output.bufferedWriter(Charsets.UTF_8).use { it.write(updated) }
+            }
+            _toast.value = "Memory updated"
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: SecurityException) {
+            _error.value = "Memory not updated: no permission to write the file. Choose the Memory file again."
+        } catch (e: Exception) {
+            _error.value = "Memory not updated: ${e.message ?: "unknown error"}"
+        }
+        return split.visible
+    }
+
+    /** Warns when the Memory file mentions turns (T4...) that no longer exist in the open chat. */
+    suspend fun memoryReferenceWarning(): String? {
+        val card = effectiveLayout().cards.firstOrNull { it.role == CardRole.MEMORY && it.enabled } ?: return null
+        if (card.fileUri.isBlank()) return null
+        val text = try {
+            withContext(Dispatchers.IO) {
+                getApplication<Application>().contentResolver
+                    .openInputStream(android.net.Uri.parse(card.fileUri))
+                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        val conversation = store.snapshot().firstOrNull { it.id == _activeId.value } ?: return null
+        val existing = conversation.withTurnNumbers().messages
+            .filter { it.role == "user" }.mapNotNull { it.turnNo }.toSet()
+        val missing = Regex("""\bT(\d+)\b""").findAll(text)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .filter { it !in existing }.toSet().sorted()
+        if (missing.isEmpty()) return null
+        return "The Memory file mentions " + missing.joinToString(", ") { "T$it" } +
+            ", which no longer exist in the open chat."
+    }
+
+    /** Builds the request the next message would send, without sending it, and describes it as text. */
+    suspend fun previewRequest(): String {
+        val current = settings.value
+        val layout = effectiveLayout()
+        val workspaceRepository = workspaceRepositoryFor(current)
+        return try {
+            val setup = resolveTools(layout, workspaceRepository != null)
+            val conversation = (store.snapshot().firstOrNull { it.id == _activeId.value }
+                ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
+            val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
+            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
+                .build(layout, conversation.messages + next)
+            buildString {
+                for (message in messages) {
+                    append("[").append(message.role).append("]\n")
+                    val parts = message.parts
+                    append(if (parts != null) parts.joinToString("\n") { it.text ?: "[image]" } else message.content)
+                    message.toolCalls?.forEach { append("\n  tool call: ${it.name} ${it.arguments}") }
+                    append("\n\n")
+                }
+                append("--- Tools ---\n")
+                when {
+                    workspaceRepository == null || setup.mode == "none" -> append("No tools.")
+                    setup.mode == "custom" -> append(setup.specs.joinToString(", ") { it.name })
+                    else -> append(
+                        buildList {
+                            if (current.toolListFilesEnabled) add("list_files")
+                            if (current.toolSearchFilesEnabled) add("search_files")
+                            if (current.toolSearchContentEnabled) add("search_content")
+                            if (current.toolReadFileEnabled) add("read_file")
+                            if (current.toolGetFileInfoEnabled) add("get_file_info")
+                            if (current.toolCreateFileEnabled) add("create_file")
+                            if (current.toolEditFileEnabled) add("edit_file")
+                        }.joinToString(", ")
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            "The request cannot be built yet:\n" + (e.message ?: "unknown problem")
+        }
+    }
+
+    /** Writes a template file to a place the user chose. Never changes any card. */
+    fun createTemplate(kind: String, uri: String) {
+        viewModelScope.launch {
+            val text = when (kind) {
+                "tools" -> ToolsCardFormat.template(MarkdownFileTools.allDefinitions())
+                "memory" -> MemoryDoc.template()
+                else -> "You are a helpful assistant.\n"
+            }
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = getApplication<Application>().contentResolver
+                        .openOutputStream(android.net.Uri.parse(uri), "wt")
+                        ?: throw IllegalStateException("Could not write the file.")
+                    output.bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+                }
+                _toast.value = "Template saved"
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                _error.value = "Could not save the template: ${e.message ?: "unknown error"}"
+            }
+        }
+    }
+
+    private fun isBusy(): Boolean {
+        if (_isStreaming.value || streamingJob?.isActive == true) {
+            _toast.value = "Wait for the current answer to finish."
+            return true
+        }
+        return false
+    }
+
+    private fun changeActiveConversation(transform: (Conversation) -> Conversation) {
+        viewModelScope.launch {
+            val convId = _activeId.value ?: return@launch
+            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
+            store.upsert(transform(conv).copy(updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    /** Deletes a whole turn: the user message and everything up to the next user message. */
+    fun deleteTurn(userMessageId: String) {
+        if (isBusy()) return
+        changeActiveConversation { conv ->
+            val start = conv.messages.indexOfFirst { it.id == userMessageId }
+            if (start < 0) return@changeActiveConversation conv
+            var end = start + 1
+            while (end < conv.messages.size && conv.messages[end].role != "user") end++
+            conv.copy(messages = conv.messages.filterIndexed { index, _ -> index < start || index >= end })
+        }
+    }
+
+    /** Deletes one tool round (the calls and their results together). */
+    fun deleteToolRound(assistantMessageId: String, roundIndex: Int) {
+        if (isBusy()) return
+        changeActiveConversation { conv ->
+            conv.copy(messages = conv.messages.map { message ->
+                if (message.id == assistantMessageId && roundIndex in message.toolRounds.indices) {
+                    message.copy(toolRounds = message.toolRounds.filterIndexed { index, _ -> index != roundIndex })
+                } else message
+            })
+        }
+    }
+
+    /** Changes the text of one tool result. Its short note is made again from the new text. */
+    fun editToolResult(assistantMessageId: String, roundIndex: Int, resultIndex: Int, newText: String) {
+        if (isBusy()) return
+        changeActiveConversation { conv ->
+            val position = conv.messages.indexOfFirst { it.id == assistantMessageId }
+            if (position < 0) return@changeActiveConversation conv
+            val turnNo = conv.messages.take(position).lastOrNull { it.role == "user" }?.turnNo
+            conv.copy(messages = conv.messages.mapIndexed { index, message ->
+                if (index != position || roundIndex !in message.toolRounds.indices) return@mapIndexed message
+                val round = message.toolRounds[roundIndex]
+                if (resultIndex !in round.results.indices) return@mapIndexed message
+                val result = round.results[resultIndex]
+                val arguments = round.toolCalls.firstOrNull { it.id == result.toolCallId }?.arguments
+                val newResults = round.results.mapIndexed { i, r ->
+                    if (i == resultIndex) r.withContent(newText, arguments, turnNo) else r
+                }
+                val newRounds = message.toolRounds.mapIndexed { i, r -> if (i == roundIndex) r.copy(results = newResults) else r }
+                message.copy(toolRounds = newRounds)
+            })
         }
     }
 
