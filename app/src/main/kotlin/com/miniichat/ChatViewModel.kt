@@ -784,7 +784,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         } else {
             card.fileUri
-        }
+        } ?: return null
         if (memoryUri.isBlank()) return null
         val text = try {
             withContext(Dispatchers.IO) {
