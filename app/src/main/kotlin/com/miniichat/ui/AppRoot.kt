@@ -38,7 +38,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, HistoryManager }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, CardEdit, HistoryManager }
 
 /** Like the normal file chooser, but also asks for permission to write (needed by the Memory file). */
 private class OpenDocumentReadWrite : ActivityResultContracts.OpenDocument() {
@@ -101,8 +101,11 @@ fun AppRoot(vm: ChatViewModel) {
         }
     }
 
-    // The card whose file is being chosen in the Request Control Panel.
+    // The card whose file is being chosen, the card being edited, and the file just chosen for it.
     var pickingCardId by remember { mutableStateOf<String?>(null) }
+    var editingCardId by remember { mutableStateOf<String?>(null) }
+    var pendingNewCard by remember { mutableStateOf<com.miniichat.data.RequestCard?>(null) }
+    var pickedFile by remember { mutableStateOf<PickedFile?>(null) }
     val cardFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -115,7 +118,7 @@ fun AppRoot(vm: ChatViewModel) {
                 context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                     ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty().ifBlank { "Selected file" }
-            vm.setCardFile(cardId, uri.toString(), name)
+            pickedFile = PickedFile(cardId, uri.toString(), name)
         }
         pickingCardId = null
     }
@@ -135,7 +138,7 @@ fun AppRoot(vm: ChatViewModel) {
                 context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                     ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty().ifBlank { "Selected file" }
-            vm.setCardFile(cardId, uri.toString(), name)
+            pickedFile = PickedFile(cardId, uri.toString(), name)
         }
         pickingCardId = null
     }
@@ -314,24 +317,62 @@ fun AppRoot(vm: ChatViewModel) {
                     historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
                     onBack = { screen = Screen.Settings },
                     onLayoutChange = { vm.saveLayout(it) },
-                    onSettingsChange = { vm.updateSettings(it) },
-                    onPickFile = { cardId ->
-                        pickingCardId = cardId
-                        cardFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                    onAddCard = { newLayout, newCard ->
+                        pendingNewCard = newCard
+                        editingCardId = newCard.id
+                        vm.saveLayout(newLayout)
+                        screen = Screen.CardEdit
                     },
-                    onPickMemoryFile = { cardId ->
-                        pickingCardId = cardId
-                        memoryFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                    onEditCard = { cardId ->
+                        pendingNewCard = null
+                        editingCardId = cardId
+                        screen = Screen.CardEdit
                     },
-                    onCreateTemplate = { kind ->
-                        pendingTemplateKind = kind
-                        templateCreator.launch("$kind.md")
-                    },
-                    onOpenHistoryManager = { screen = Screen.HistoryManager },
-                    checkMemory = { vm.memoryReferenceWarning() },
                     makePreview = { vm.previewRequest() },
                     onReset = { vm.resetLayout() }
                 )
+            }
+            Screen.CardEdit -> {
+                val editingCard = requestLayout.cards.firstOrNull { it.id == editingCardId }
+                    ?: pendingNewCard?.takeIf { it.id == editingCardId }
+                if (editingCard == null) {
+                    androidx.activity.compose.BackHandler(enabled = true) { screen = Screen.RequestPanel }
+                } else {
+                    CardEditScreen(
+                        card = editingCard,
+                        settings = settings,
+                        hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
+                        historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
+                        pickedFile = pickedFile,
+                        onPickedFileConsumed = { pickedFile = null },
+                        onSaveCard = { updated ->
+                            vm.saveLayout(
+                                com.miniichat.data.RequestLayout(
+                                    requestLayout.cards.map { if (it.id == updated.id) updated else it }
+                                )
+                            )
+                        },
+                        onSaveSettings = { vm.updateSettings(it) },
+                        onClose = {
+                            pendingNewCard = null
+                            screen = Screen.RequestPanel
+                        },
+                        onPickFile = { cardId ->
+                            pickingCardId = cardId
+                            cardFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                        },
+                        onPickMemoryFile = { cardId ->
+                            pickingCardId = cardId
+                            memoryFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown"))
+                        },
+                        onCreateTemplate = { kind ->
+                            pendingTemplateKind = kind
+                            templateCreator.launch("$kind.md")
+                        },
+                        onOpenHistoryManager = { screen = Screen.HistoryManager },
+                        checkMemory = { vm.memoryReferenceWarning() }
+                    )
+                }
             }
             Screen.HistoryManager -> {
                 HistoryManagerScreen(
