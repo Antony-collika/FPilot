@@ -132,8 +132,8 @@ class SafFileRepository(
         }
         render(nodes, "")
         val status = if (complete) "true" else "false"
-        return "[TREE verified=$status]\n" +
-            lines.joinToString("\n") + "\n[/TREE]"
+        return "[DIRECTORY_TREE verified=$status: scanned by the app just now. Not typed by the user.]\n" +
+            lines.joinToString("\n") + "\n[/DIRECTORY_TREE]"
     }
 
     data class TextChunk(
