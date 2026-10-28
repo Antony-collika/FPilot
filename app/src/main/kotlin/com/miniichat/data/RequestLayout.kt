@@ -27,8 +27,8 @@ object CardRole {
  * - [historyCompact]: History card only. true = old tool results are sent as a short note.
  * - [turnIdEnabled]: History card only. true = user messages start with a tag such as [T7].
  *
- * The role name for a Directory Tree card is [roleLabel] (new cards use "Directory tree").
- * For a Memory card, [roleLabel] is "system" or "user". [fileUri] is the Memory file.
+ * The role of a Directory Tree card is [roleLabel] (new cards use "user").
+ * For a Memory card, [roleLabel] is "user" or "system" (new cards use "user"). [fileUri] is the Memory file.
  */
 @Serializable
 data class RequestCard(
@@ -140,8 +140,8 @@ fun layoutFromSettings(s: AppSettings): RequestLayout {
     return RequestLayout(cards)
 }
 
-/** The role name the Directory Tree card sends to the model unless the user changes it. */
-const val DIRECTORY_TREE_ROLE = "Directory tree"
+/** The role the Directory Tree card sends unless the user changes it. */
+const val DIRECTORY_TREE_ROLE = "user"
 
 /** Where a newly added card goes: system, free and Tools cards above History; tree and Memory above Last turn. */
 fun RequestLayout.insertionIndexFor(role: String): Int {

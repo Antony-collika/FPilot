@@ -62,8 +62,14 @@ class RequestBuilder(
                     } catch (e: MemoryFormatException) {
                         throw RequestBuildException("The Memory file has a problem: ${e.message}")
                     }
-                    val role = if (card.roleLabel.trim().equals("user", ignoreCase = true)) "user" else "system"
-                    out += ChatMessage(role, "[MEMORY]\n${raw.trim()}\n[/MEMORY]")
+                    // Sent as "user" unless the card says "system". The first line tells the model
+                    // that this is not something the user typed.
+                    val role = if (card.roleLabel.trim().equals("system", ignoreCase = true)) "system" else "user"
+                    out += ChatMessage(
+                        role,
+                        "[MEMORY: notes written by the assistant in earlier turns. Added by the app, not typed by the user.]\n" +
+                            "${raw.trim()}\n[/MEMORY]"
+                    )
                 }
                 CardRole.HISTORY -> out += expand(historyMessages, historyCard)
                 CardRole.LAST_TURN -> out += expand(lastTurnMessages, historyCard)
