@@ -73,5 +73,9 @@ data class Conversation(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     /** The number the next turn will get. It only goes up, deleting a turn never lowers it. */
-    @SerialName("next_turn_no") val nextTurnNo: Int = 1
+    @SerialName("next_turn_no") val nextTurnNo: Int = 1,
+    /** Random eight-hex-character identifier used for a file-backed session folder. */
+    @SerialName("session_id") val sessionId: String? = null,
+    /** Persisted Storage tree URI; changing Settings does not redirect an existing session. */
+    @SerialName("session_storage_uri") val sessionStorageUri: String? = null
 )

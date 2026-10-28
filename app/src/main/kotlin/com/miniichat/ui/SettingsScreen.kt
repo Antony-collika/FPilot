@@ -58,10 +58,14 @@ fun SettingsScreen(
     providers: List<ProviderConfig>,
     workspaceName: String,
     workspaceTreeUri: String,
+    storageName: String,
+    storageTreeUri: String,
     onBack: () -> Unit,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onChooseWorkspace: () -> Unit,
     onClearWorkspace: () -> Unit,
+    onChooseStorage: () -> Unit,
+    onClearStorage: () -> Unit,
     onOpenProviders: () -> Unit,
     onChooseSystemPromptFile: () -> Unit,
     onChooseSkillsFile: () -> Unit,
@@ -357,6 +361,31 @@ fun SettingsScreen(
                         }
                         Text("Blank allows writes anywhere in the selected workspace. Example: notes/projects",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                SectionHeader("Session storage")
+                SectionCard {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Storage", style = MaterialTheme.typography.titleMedium)
+                                Text(if (storageTreeUri.isBlank()) "No selection" else storageName,
+                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            if (storageTreeUri.isNotBlank()) androidx.compose.material3.TextButton(onClick = onClearStorage) { Text("Clear") }
+                            androidx.compose.material3.Button(onClick = onChooseStorage) {
+                                Text(if (storageTreeUri.isBlank()) "Choose folder" else "Change folder")
+                            }
+                        }
+                        Text(
+                            "Separate from Workspace. New chats create a sessions folder with a unique ID, history.md, and memory.md. Existing chats are kept.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 SectionCard {

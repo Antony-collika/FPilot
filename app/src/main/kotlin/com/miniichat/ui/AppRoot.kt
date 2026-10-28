@@ -71,6 +71,20 @@ fun AppRoot(vm: ChatViewModel) {
         }
     }
 
+    val storagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            vm.updateSettings { it.copy(storageTreeUri = uri.toString()) }
+        }
+    }
+
     val systemPromptFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -223,6 +237,30 @@ fun AppRoot(vm: ChatViewModel) {
         }
     }
 
+    val sessionMemoryEnabled =
+        (activeConv?.sessionId != null && !activeConv.sessionStorageUri.isNullOrBlank()) ||
+            (settings.storageTreeUri.isNotBlank() &&
+                (activeConv == null || activeConv.messages.isEmpty()))
+
+    val storageName = remember(settings.storageTreeUri) {
+        if (settings.storageTreeUri.isBlank()) {
+            ""
+        } else {
+            runCatching {
+                val treeUri = Uri.parse(settings.storageTreeUri)
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri,
+                    DocumentsContract.getTreeDocumentId(treeUri)
+                )
+                context.contentResolver.query(
+                    documentUri,
+                    arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                    null, null, null
+                )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty().ifBlank { "Selected folder" }
+        }
+    }
+
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(toast) {
         toast?.let {
@@ -299,10 +337,14 @@ fun AppRoot(vm: ChatViewModel) {
                     providers = providers,
                     workspaceTreeUri = settings.workspaceTreeUri,
                     workspaceName = workspaceName,
+                    storageTreeUri = settings.storageTreeUri,
+                    storageName = storageName,
                     onBack = { screen = Screen.Chat },
                     onChange = { vm.updateSettings(it) },
                     onChooseWorkspace = { workspacePicker.launch(null) },
                     onClearWorkspace = { vm.setWorkspace(null) },
+                    onChooseStorage = { storagePicker.launch(null) },
+                    onClearStorage = { vm.updateSettings { it.copy(storageTreeUri = "") } },
                     onOpenProviders = { screen = Screen.Providers },
                     onChooseSystemPromptFile = { systemPromptFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
                     onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
@@ -342,6 +384,7 @@ fun AppRoot(vm: ChatViewModel) {
                         card = editingCard,
                         settings = settings,
                         hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
+                        sessionMemoryEnabled = sessionMemoryEnabled,
                         historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
                         pickedFile = pickedFile,
                         onPickedFileConsumed = { pickedFile = null },

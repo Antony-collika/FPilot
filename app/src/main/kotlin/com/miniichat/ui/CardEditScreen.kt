@@ -53,6 +53,7 @@ fun CardEditScreen(
     card: RequestCard,
     settings: AppSettings,
     hasWorkspace: Boolean,
+    sessionMemoryEnabled: Boolean,
     historyTurnCount: Int,
     pickedFile: PickedFile?,
     onPickedFileConsumed: () -> Unit,
@@ -127,6 +128,7 @@ fun CardEditScreen(
                 CardRole.MEMORY -> MemoryEditor(
                     card = draft,
                     historyTurnCount = historyTurnCount,
+                    sessionMemoryEnabled = sessionMemoryEnabled,
                     onChange = { draft = it },
                     onPickMemoryFile = { onPickMemoryFile(card.id) },
                     onCreateTemplate = onCreateTemplate,
@@ -250,13 +252,14 @@ private fun HistoryEditor(
 private fun MemoryEditor(
     card: RequestCard,
     historyTurnCount: Int,
+    sessionMemoryEnabled: Boolean,
     onChange: (RequestCard) -> Unit,
     onPickMemoryFile: () -> Unit,
     onCreateTemplate: (String) -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var warning by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(card.fileUri, historyTurnCount) { warning = checkMemory() }
+    LaunchedEffect(card.fileUri, historyTurnCount, sessionMemoryEnabled) { warning = checkMemory() }
 
     Text("Role sent to the model", style = MaterialTheme.typography.bodyLarge)
     SourceRadio("user (recommended)", card.roleLabel.trim().lowercase() != "system") { onChange(card.copy(roleLabel = "user")) }
@@ -264,16 +267,25 @@ private fun MemoryEditor(
     Hint("Some providers move every system message to the top of the conversation, which breaks the cache. " +
         "With user, the memory stays where you put the card, and its first line tells the model it is not something you typed.")
     Spacer(Modifier.height(4.dp))
-    Text(
-        card.fileName.ifBlank { "No Memory file selected" },
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    TextButton(onClick = onPickMemoryFile) {
-        Text(if (card.fileUri.isBlank()) "Choose Memory file" else "Change Memory file")
+    if (sessionMemoryEnabled) {
+        Text(
+            "memory.md — one file per session",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Hint("The app creates this file inside the session folder when the first message is sent. It is read again before every request, so manual edits are respected.")
+    } else {
+        Text(
+            card.fileName.ifBlank { "No Memory file selected" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        TextButton(onClick = onPickMemoryFile) {
+            Text(if (card.fileUri.isBlank()) "Choose Memory file" else "Change Memory file")
+        }
+        TextButton(onClick = { onCreateTemplate("memory") }) { Text("Create a template file") }
+        Hint("The model updates this file itself at the end of its answers. You can edit the file by hand between messages.")
     }
-    TextButton(onClick = { onCreateTemplate("memory") }) { Text("Create a template file") }
-    Hint("The model updates this file itself at the end of its answers. You can edit the file by hand between messages.")
     warning?.let { Hint(it, isError = true) }
 }
 

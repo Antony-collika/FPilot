@@ -13,7 +13,11 @@ import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.data.AppSettings
 import com.miniichat.data.Conversation
-import com.miniichat.data.ConversationStore
+import com.miniichat.data.DataStoreSessionRepository
+import com.miniichat.data.FileSessionStore
+import com.miniichat.data.SessionFiles
+import com.miniichat.data.SessionFilesRepository
+import com.miniichat.data.SessionRepository
 import com.miniichat.data.Message
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderStore
@@ -74,7 +78,8 @@ private class ToolPermissionSession {
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val store = ConversationStore(app)
+    private val store: SessionRepository = DataStoreSessionRepository(app)
+    private val fileSessionStore: SessionFilesRepository = FileSessionStore(app.contentResolver)
     val settingsRepo = SettingsRepository(app)
     val providerStore = ProviderStore(app)
     private val client = LlmClient()
@@ -394,7 +399,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val temperature = current.temperature
 
         viewModelScope.launch {
-            val layout = effectiveLayout()
+            val activeId = _activeId.value ?: newId().also { _activeId.value = it }
+            val existing = store.snapshot().firstOrNull { it.id == activeId }
+            val baseTitle = trimmed.take(30).replace("\n", " ")
+            val requestedLayout = effectiveLayout()
+
+            // New chats get a session ID only when Storage is configured. Existing chats without
+            // a session ID stay in the legacy DataStore path; their history is not migrated.
+            val sessionId = existing?.sessionId ?: if (
+                current.storageTreeUri.isNotBlank() && (existing == null || existing.messages.isEmpty())
+            ) {
+                FileSessionStore.newSessionId()
+            } else {
+                null
+            }
+            val sessionStorageUri = existing?.sessionStorageUri?.takeIf { it.isNotBlank() }
+                ?: sessionId?.let { current.storageTreeUri.takeIf(String::isNotBlank) }
+            val sessionFiles = if (sessionId != null && !sessionStorageUri.isNullOrBlank()) {
+                try {
+                    fileSessionStore.ensureSession(sessionStorageUri, sessionId)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    _error.value = "Storage folder could not be opened: ${e.message ?: "unknown error"}"
+                    return@launch
+                }
+            } else {
+                null
+            }
+            val layout = sessionFiles?.let { layoutWithSessionMemory(requestedLayout, it) } ?: requestedLayout
             val workspaceRepository = workspaceRepositoryFor(current)
             val toolsSetup = try {
                 resolveTools(layout, workspaceRepository != null)
@@ -407,12 +440,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             fun shown(text: String): String =
                 if (memoryCard != null) MemoryPatch.hideForDisplay(text) else text
 
-            val activeId = _activeId.value ?: newId().also { _activeId.value = it }
-            val existing = store.snapshot().firstOrNull { it.id == activeId }
-            val baseTitle = trimmed.take(30).replace("\n", " ")
-
             // Old chats get their turn numbers here, once. The counter only goes up.
             val baseConversation = (existing ?: Conversation(id = activeId, title = baseTitle, messages = emptyList()))
+                .copy(
+                    sessionId = sessionId ?: existing?.sessionId,
+                    sessionStorageUri = sessionStorageUri ?: existing?.sessionStorageUri
+                )
                 .withTurnNumbers()
             val turnNo = baseConversation.nextTurnNo
 
@@ -738,18 +771,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Warns when the Memory file mentions turns (T4...) that no longer exist in the open chat. */
     suspend fun memoryReferenceWarning(): String? {
-        val card = effectiveLayout().cards.firstOrNull { it.role == CardRole.MEMORY && it.enabled } ?: return null
-        if (card.fileUri.isBlank()) return null
+        val layout = effectiveLayout()
+        val card = layout.cards.firstOrNull { it.role == CardRole.MEMORY && it.enabled } ?: return null
+        val conversation = store.snapshot().firstOrNull { it.id == _activeId.value } ?: return null
+        val memoryUri = if (
+            !conversation.sessionId.isNullOrBlank() && !conversation.sessionStorageUri.isNullOrBlank()
+        ) {
+            try {
+                fileSessionStore.ensureSession(conversation.sessionStorageUri, conversation.sessionId).memoryUri
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            card.fileUri
+        }
+        if (memoryUri.isBlank()) return null
         val text = try {
             withContext(Dispatchers.IO) {
                 getApplication<Application>().contentResolver
-                    .openInputStream(android.net.Uri.parse(card.fileUri))
+                    .openInputStream(android.net.Uri.parse(memoryUri))
                     ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
             }
         } catch (e: Exception) {
             null
         } ?: return null
-        val conversation = store.snapshot().firstOrNull { it.id == _activeId.value } ?: return null
         val existing = conversation.withTurnNumbers().messages
             .filter { it.role == "user" }.mapNotNull { it.turnNo }.toSet()
         val missing = Regex("""\bT(\d+)\b""").findAll(text)
@@ -760,14 +805,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             ", which no longer exist in the open chat."
     }
 
+    private fun layoutWithSessionMemory(layout: RequestLayout, files: SessionFiles): RequestLayout =
+        RequestLayout(
+            layout.cards.map { card ->
+                if (card.role == CardRole.MEMORY) {
+                    card.copy(source = "file", fileUri = files.memoryUri, fileName = "memory.md")
+                } else {
+                    card
+                }
+            }
+        )
+
     /** Builds the request the next message would send, without sending it, and describes it as text. */
     suspend fun previewRequest(): String {
         val current = settings.value
-        val layout = effectiveLayout()
+        val storedConversation = store.snapshot().firstOrNull { it.id == _activeId.value }
+        val baseLayout = effectiveLayout()
+        val layout = if (
+            storedConversation != null &&
+            !storedConversation.sessionId.isNullOrBlank() &&
+            !storedConversation.sessionStorageUri.isNullOrBlank()
+        ) {
+            try {
+                layoutWithSessionMemory(
+                    baseLayout,
+                    fileSessionStore.ensureSession(storedConversation.sessionStorageUri, storedConversation.sessionId)
+                )
+            } catch (e: Exception) {
+                return "The request cannot be built yet:\\nStorage folder could not be opened: ${e.message ?: "unknown error"}"
+            }
+        } else {
+            baseLayout
+        }
         val workspaceRepository = workspaceRepositoryFor(current)
         return try {
             val setup = resolveTools(layout, workspaceRepository != null)
-            val conversation = (store.snapshot().firstOrNull { it.id == _activeId.value }
+            val conversation = (storedConversation
                 ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
             val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
             val messages = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
