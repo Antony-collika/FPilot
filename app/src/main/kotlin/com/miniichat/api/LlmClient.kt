@@ -161,8 +161,11 @@ class LlmClient {
     private fun recordRequestBody(bodyText: String) = appendLogEntry("REQUEST", bodyText)
 
     /** Records the raw response body before parsing or extracting user-visible text. */
-    private fun recordReceivedBody(statusCode: Int, bodyText: String) =
-        appendLogEntry("RECEIVED (HTTP $statusCode)", bodyText)
+    private fun recordReceivedBody(statusCode: Int, bodyText: String) {
+        // If the provider reported token usage, show a one-line summary above the raw body.
+        val usage = runCatching { summarizeUsage(bodyText) }.getOrNull()
+        appendLogEntry("RECEIVED (HTTP $statusCode)", if (usage == null) bodyText else "[usage] $usage\n$bodyText")
+    }
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
