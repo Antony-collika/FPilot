@@ -664,12 +664,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         val text = if (card.source == "file") readPromptFile(card.fileUri, card.displayName()) else card.text
+        val definitions = MarkdownFileTools.allDefinitions()
         val specs = try {
-            ToolsCardFormat.parse(text, MarkdownFileTools.ALL_TOOL_NAMES)
+            ToolsCardFormat.parse(text, definitions.associate { it.name to it.description })
         } catch (e: ToolsCardException) {
             throw RequestBuildException("The \"${card.displayName()}\" card has a problem: ${e.message}")
         }
-        val baseByName = MarkdownFileTools.allDefinitions().associateBy { it.name }
+        val baseByName = definitions.associateBy { it.name }
         val exposed = specs.map { spec ->
             ExposedTool(
                 uid = spec.uid,
@@ -689,7 +690,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         directoryTree = { depth ->
             workspaceRepository?.let { repository ->
                 runCatching { repository.directoryTree(depth) }
-                    .getOrElse { "[TREE verified=false]\n[tree unavailable: ${it.message ?: "scan failed"}]\n[/TREE]" }
+                    .getOrElse {
+                        "[DIRECTORY_TREE verified=false: the scan failed. Not typed by the user.]\n" +
+                            "[tree unavailable: ${it.message ?: "scan failed"}]\n[/DIRECTORY_TREE]"
+                    }
             }
         },
         renderVars = { template ->
@@ -804,7 +808,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val text = when (kind) {
                 "tools" -> ToolsCardFormat.template(MarkdownFileTools.allDefinitions())
                 "memory" -> MemoryDoc.template()
-                else -> "You are a helpful assistant.\n"
+                else -> "You are a helpful assistant.\n\n" +
+                    "Some messages with the role \"user\" are not typed by the human. The app adds them and marks them clearly: " +
+                    "[MEMORY: ...] holds notes you wrote in earlier turns, [DIRECTORY_TREE ...] is a folder tree scanned by the app, " +
+                    "and a tag such as [T7] at the start of a message is the number of that turn.\n"
             }
             try {
                 withContext(Dispatchers.IO) {
