@@ -10,32 +10,82 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class ToolsCardTest {
-    private val known = setOf("list_files", "read_file")
+    private val origins = mapOf(
+        "read_file" to "Read a file.",
+        "list_files" to "List files."
+    )
+    private val definitions = listOf(
+        com.miniichat.api.ToolDefinition("read_file", "Read a file.", kotlinx.serialization.json.JsonObject(emptyMap())),
+        com.miniichat.api.ToolDefinition("list_files", "List files.", kotlinx.serialization.json.JsonObject(emptyMap()))
+    )
 
     @Test
-    fun parsesNamesAndMultiLineDescriptions() {
+    fun theTemplateIsValidAndHasFourFieldsPerTool() {
+        val text = ToolsCardFormat.template(definitions)
+        assertTrue(text.contains("uid: read_file"))
+        assertTrue(text.contains("origin_description: Read a file."))
+        val specs = ToolsCardFormat.parse(text, origins)
+        assertEquals(listOf("read_file", "list_files"), specs.map { it.uid })
+    }
+
+    @Test
+    fun notesAreIgnoredAndNamesAndDescriptionsAreRead() {
         val specs = ToolsCardFormat.parse(
-            "## read_file\nname: open\ndescription: Read it.\n  More text.\n\n## list_files\nname: ls\ndescription: List.",
-            known
+            "> note\n## a\n> do not change\nuid: read_file\norigin_description: Read a\n  file.\n> editable\nname: open\n" +
+                "description: Read it.\n  More text.\n\n## b\nuid: list_files\norigin_description: List files.\nname: ls\ndescription: List.",
+            origins
         )
         assertEquals(listOf("open", "ls"), specs.map { it.name })
-        assertEquals(listOf("read_file", "list_files"), specs.map { it.uid })
         assertEquals("Read it.\nMore text.", specs[0].description)
     }
 
     @Test
+    fun anEditedOriginLineIsRejected() {
+        val text = ToolsCardFormat.template(definitions).replace("origin_description: Read a file.", "origin_description: Something else.")
+        try {
+            ToolsCardFormat.parse(text, origins)
+            fail("Expected an error")
+        } catch (e: ToolsCardException) {
+            assertTrue(e.message!!.contains("origin_description"))
+        }
+    }
+
+    @Test
+    fun aSwappedUidIsCaughtByTheOriginCheck() {
+        val text = "## x\nuid: list_files\norigin_description: Read a file.\nname: a\ndescription: b"
+        try {
+            ToolsCardFormat.parse(text, origins)
+            fail("Expected an error")
+        } catch (e: ToolsCardException) {
+            assertTrue(e.message!!.contains("list_files"))
+        }
+    }
+
+    @Test
+    fun theOldFormatStillWorksAndRefreshUpgradesIt() {
+        val old = "## read_file\nname: open\ndescription: Read it."
+        assertEquals("open", ToolsCardFormat.parse(old, origins).single().name)
+        val upgraded = ToolsCardFormat.refresh(old, definitions)
+        assertTrue(upgraded.contains("uid: read_file"))
+        val spec = ToolsCardFormat.parse(upgraded, origins).single()
+        assertEquals("open", spec.name)
+        assertEquals("Read it.", spec.description)
+    }
+
+    @Test
     fun rejectsUnknownToolsDuplicatesAndBadNames() {
+        val head = "origin_description: Read a file.\n"
         val bad = listOf(
             "## nope\nname: a\ndescription: b",
-            "## read_file\nname: a\ndescription: b\n\n## read_file\nname: c\ndescription: d",
-            "## read_file\nname: same\ndescription: b\n\n## list_files\nname: same\ndescription: d",
-            "## read_file\nname: has space\ndescription: b",
-            "## read_file\nname: a\n",
+            "## read_file\nuid: read_file\n${head}name: a\ndescription: b\n\n## read_file\nuid: read_file\n${head}name: c\ndescription: d",
+            "## read_file\nuid: read_file\n${head}name: same\ndescription: b\n\n## list_files\nuid: list_files\norigin_description: List files.\nname: same\ndescription: d",
+            "## read_file\nuid: read_file\n${head}name: has space\ndescription: b",
+            "## read_file\nuid: read_file\n${head}name: a\n",
             ""
         )
         for (text in bad) {
             try {
-                ToolsCardFormat.parse(text, known)
+                ToolsCardFormat.parse(text, origins)
                 fail("Expected an error for: $text")
             } catch (e: ToolsCardException) {
                 assertNotNull(e.message)
@@ -130,12 +180,12 @@ class RequestCardsExtraTest {
     @Test
     fun theMemoryFileIsSentWrappedAndCanBeAUserMessage() = runBlocking {
         val asSystem = RequestLayout(listOf(metadata, history, RequestCard(id = "x", role = CardRole.MEMORY, fileUri = "u"), lastTurn))
-        val system = builder().build(asSystem, chat).first { it.content.startsWith("[MEMORY]") }
+        val system = builder().build(asSystem, chat).first { it.content.startsWith("[MEMORY") }
         assertEquals("system", system.role)
         val asUser = RequestLayout(
             listOf(metadata, history, RequestCard(id = "x", role = CardRole.MEMORY, fileUri = "u", roleLabel = "user"), lastTurn)
         )
-        assertEquals("user", builder().build(asUser, chat).first { it.content.startsWith("[MEMORY]") }.role)
+        assertEquals("user", builder().build(asUser, chat).first { it.content.startsWith("[MEMORY") }.role)
     }
 
     @Test
