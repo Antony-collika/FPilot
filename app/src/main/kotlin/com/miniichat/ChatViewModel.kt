@@ -314,14 +314,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Applies an in-app history edit to the latest file version and commits it to disk first. */
-    private fun persistHistoryEdit(id: String, transform: (Conversation) -> Conversation) {
+    private fun persistHistoryEdit(
+        id: String,
+        transform: (Conversation) -> Conversation,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
         viewModelScope.launch {
             historySyncMutex.withLock {
-                val current = store.snapshot().firstOrNull { it.id == id } ?: return@withLock
+                val current = store.snapshot().firstOrNull { it.id == id } ?: run { onComplete(false); return@withLock }
                 val sessionId = current.sessionId
                 val storageUri = current.sessionStorageUri?.takeIf { it.isNotBlank() }
                 if (sessionId == null || storageUri == null) {
                     store.upsert(transform(current).copy(updatedAt = System.currentTimeMillis()))
+                    onComplete(true)
                     return@withLock
                 }
                 try {
@@ -355,8 +360,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         nextTurnNo = verified.nextTurn,
                         createdAt = verified.createdAt
                     ))
+                    onComplete(true)
                 } catch (e: Exception) {
                     _error.value = "Could not save chat history: " + (e.message ?: "unknown error")
+                    onComplete(false)
                 }
             }
         }
@@ -945,12 +952,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Edit a message's text content (no resend). */
-    fun editMessage(messageId: String, newContent: String) {
-        if (isBusy()) return
-        val convId = _activeId.value ?: return
-        persistHistoryEdit(convId) { conv ->
+    fun editMessage(messageId: String, newContent: String, onComplete: (Boolean) -> Unit = {}) {
+        if (isBusy()) { onComplete(false); return }
+        val convId = _activeId.value ?: run { onComplete(false); return }
+        persistHistoryEdit(convId, { conv ->
             conv.copy(messages = conv.messages.map { if (it.id == messageId) it.copy(content = newContent) else it })
-        }
+        }, onComplete)
     }
 
     /**
