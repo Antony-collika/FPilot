@@ -322,6 +322,10 @@ fun AppRoot(vm: ChatViewModel) {
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenRequestLogs = { screen = Screen.RequestLogs },
+                        hasFileSession = activeConv?.sessionId != null,
+                        onRepairHistory = { vm.repairActiveHistory() },
+                        onRepairMemory = { vm.repairActiveMemory() },
+                        onCreateHistoryTemplate = { vm.createActiveHistoryTemplate() },
                         onPickModel = {
                             if (providers.isEmpty()) {
                                 editingProvider = null

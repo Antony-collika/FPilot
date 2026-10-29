@@ -53,6 +53,87 @@ class FileSessionStore(
             )
         }
 
+    /** Read a session Markdown file using the persisted Storage Access Framework URI. */
+    override suspend fun readText(uriString: String): String = withContext(Dispatchers.IO) {
+        val uri = Uri.parse(uriString)
+        resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            ?: throw IOException("Could not read the session file.")
+    }
+
+    /** Replace a session Markdown file. Callers must re-read it immediately before writing. */
+    override suspend fun writeText(uriString: String, text: String) = withContext(Dispatchers.IO) {
+        val uri = Uri.parse(uriString)
+        val output = resolver.openOutputStream(uri, "wt")
+            ?: throw IOException("Could not write the session file.")
+        output.bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+    }
+
+    /** Create a sibling backup before any repair operation. */
+    override suspend fun backupFile(uriString: String): String = withContext(Dispatchers.IO) {
+        val uri = Uri.parse(uriString)
+        val originalName = queryDisplayName(uri) ?: throw IOException("Could not determine the file name for backup.")
+        val treeUri = uri
+        val documentId = DocumentsContract.getDocumentId(uri)
+        val parentId = documentId.substringBeforeLast('/', "")
+        if (parentId.isBlank()) throw IOException("Could not determine the parent folder for backup.")
+        val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId)
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
+        val base = originalName.removeSuffix(".md")
+        val backupName = "$base.broken-$stamp.md"
+        val backup = DocumentsContract.createDocument(resolver, parent, "text/markdown", backupName)
+            ?: throw IOException("Could not create the backup file.")
+        val original = resolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IOException("Could not read the original file for backup.")
+        resolver.openOutputStream(backup, "wt")?.use { it.write(original) }
+            ?: throw IOException("Could not write the backup file.")
+        backup.toString()
+    }
+
+    /** Repairs a Memory file while retaining content under recognized section headings. */
+    override suspend fun repairMemory(uriString: String): String {
+        val original = readText(uriString)
+        val backup = backupFile(uriString)
+        val repaired = runCatching { MemoryDoc.parse(original) }.getOrElse {
+            val sections = MemoryDoc.HEADINGS.associateWith { mutableListOf<String>() }
+            val preamble = mutableListOf<String>()
+            val skipped = mutableListOf<String>()
+            var current: String? = null
+            for (line in original.replace("\r\n", "\n").replace("\r", "\n").split("\n")) {
+                if (line.startsWith("## ")) {
+                    val name = line.removePrefix("## ").trim()
+                    if (name in sections) current = name
+                    else {
+                        skipped += name
+                        current = null
+                    }
+                } else if (current != null) {
+                    if (line.isNotBlank()) sections.getValue(current!!).add(line.trimEnd())
+                } else if (line.isNotBlank()) {
+                    preamble += line
+                }
+            }
+            preamble += skipped.map { name ->
+                "<!-- Repair note: skipped unknown Memory heading: " + name.replace("--", "—") + " -->"
+            }
+            MemoryDoc(preamble.joinToString("\n"), sections.mapValues { it.value.toList() })
+        }
+        writeText(uriString, repaired.render())
+        return backup
+    }
+
+    /** Repairs history only after successfully backing up the original bytes. */
+    override suspend fun repairHistory(uriString: String, sessionId: String, title: String): String {
+        val original = readText(uriString)
+        val repaired = HistoryMd.repair(original, sessionId, title)
+        val backup = backupFile(uriString)
+        writeText(uriString, HistoryMd.render(repaired))
+        return backup
+    }
+
+    override suspend fun createHistoryTemplate(uriString: String, sessionId: String, title: String) {
+        writeText(uriString, HistoryMd.render(HistoryMd.empty(sessionId, title)))
+    }
+
     private fun findOrCreateDirectory(treeUri: Uri, parent: Uri, name: String): Uri {
         val found = listChildren(treeUri, parent).firstOrNull { it.name == name }
         if (found != null) {

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -94,7 +95,11 @@ fun ChatScreen(
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
     onPickModel: () -> Unit,
-    onOpenRequestLogs: () -> Unit
+    onOpenRequestLogs: () -> Unit,
+    hasFileSession: Boolean = false,
+    onRepairHistory: () -> Unit = {},
+    onRepairMemory: () -> Unit = {},
+    onCreateHistoryTemplate: () -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
@@ -128,7 +133,11 @@ fun ChatScreen(
             onMenu = onMenu,
             onPickModel = onPickModel,
             onNew = onNew,
-            onOpenRequestLogs = onOpenRequestLogs
+            onOpenRequestLogs = onOpenRequestLogs,
+            hasFileSession = hasFileSession,
+            onRepairHistory = onRepairHistory,
+            onRepairMemory = onRepairMemory,
+            onCreateHistoryTemplate = onCreateHistoryTemplate
         )
 
         if (messages.isEmpty()) {
@@ -236,7 +245,11 @@ private fun ChatTopBar(
     onMenu: () -> Unit,
     onPickModel: () -> Unit,
     onNew: () -> Unit,
-    onOpenRequestLogs: () -> Unit
+    onOpenRequestLogs: () -> Unit,
+    hasFileSession: Boolean,
+    onRepairHistory: () -> Unit,
+    onRepairMemory: () -> Unit,
+    onCreateHistoryTemplate: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -265,6 +278,20 @@ private fun ChatTopBar(
             IconButton(onClick = onOpenRequestLogs) {
                 Icon(Icons.Default.Article, contentDescription = "LLM request logs",
                     tint = MaterialTheme.colorScheme.onSurface)
+            }
+            if (hasFileSession) {
+                IconButton(onClick = onRepairHistory) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Repair history.md",
+                        tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = onRepairMemory) {
+                    Icon(Icons.Default.Build, contentDescription = "Repair memory.md",
+                        tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = onCreateHistoryTemplate) {
+                    Icon(Icons.Default.Add, contentDescription = "Create history.md template",
+                        tint = MaterialTheme.colorScheme.onSurface)
+                }
             }
             IconButton(onClick = onNew) {
                 Icon(Icons.Default.Edit, contentDescription = "new chat",

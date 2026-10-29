@@ -25,6 +25,9 @@ import com.miniichat.data.SettingsRepository
 import com.miniichat.data.CardRole
 import com.miniichat.data.MemoryDoc
 import com.miniichat.data.MemoryPatch
+import com.miniichat.data.HistoryDocument
+import com.miniichat.data.HistoryFormatException
+import com.miniichat.data.HistoryMd
 import com.miniichat.data.RequestBuildException
 import com.miniichat.data.RequestBuilder
 import com.miniichat.data.RequestCard
@@ -54,7 +57,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -258,7 +263,130 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun respondToToolApproval(approved: Boolean) { approvalCompletion?.complete(approved) }
 
-    fun selectConversation(id: String?) { _activeId.value = id }
+    fun selectConversation(id: String?) {
+        _activeId.value = id
+        if (id == null || _isStreaming.value) return
+        viewModelScope.launch {
+            val conversation = store.snapshot().firstOrNull { it.id == id } ?: return@launch
+            val sessionId = conversation.sessionId ?: return@launch
+            val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return@launch
+            try {
+                val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                val raw = fileSessionStore.readText(files.historyUri)
+                val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
+                    HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                        nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                        messages = HistoryMd.completedMessages(conversation.messages)
+                    ).also { fileSessionStore.writeText(files.historyUri, HistoryMd.render(it)) }
+                } else {
+                    HistoryMd.parse(raw, sessionId, conversation.title)
+                }
+                store.upsert(conversation.copy(
+                    title = document.title,
+                    messages = document.messages,
+                    nextTurnNo = document.nextTurn,
+                    createdAt = document.createdAt
+                ))
+            } catch (e: Exception) {
+                _error.value = "Could not load session history: " + (e.message ?: "unknown error")
+            }
+        }
+    }
+
+    fun repairActiveHistory() {
+        if (_isStreaming.value) return
+        viewModelScope.launch {
+            val id = _activeId.value ?: return@launch
+            val conversation = store.snapshot().firstOrNull { it.id == id } ?: return@launch
+            val sessionId = conversation.sessionId ?: run {
+                _error.value = "This conversation does not have a file-backed session."
+                return@launch
+            }
+            val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: run {
+                _error.value = "The Storage folder for this session is unavailable."
+                return@launch
+            }
+            try {
+                val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                val raw = fileSessionStore.readText(files.historyUri)
+                val backup = fileSessionStore.backupFile(files.historyUri)
+                val repairedDocument = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
+                    HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                        nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                        messages = HistoryMd.completedMessages(conversation.messages)
+                    )
+                } else {
+                    HistoryMd.repair(raw, sessionId, conversation.title)
+                }
+                fileSessionStore.writeText(files.historyUri, HistoryMd.render(repairedDocument))
+                val repaired = HistoryMd.parse(fileSessionStore.readText(files.historyUri), sessionId, conversation.title)
+                store.upsert(conversation.copy(
+                    title = repaired.title,
+                    messages = repaired.messages,
+                    nextTurnNo = repaired.nextTurn,
+                    createdAt = repaired.createdAt,
+                    updatedAt = System.currentTimeMillis()
+                ))
+                _toast.value = "history.md repaired. Backup created: " + backup.substringAfterLast('/')
+            } catch (e: Exception) {
+                _error.value = "Could not repair history.md: " + (e.message ?: "unknown error")
+            }
+        }
+    }
+
+    fun repairActiveMemory() {
+        if (_isStreaming.value) return
+        viewModelScope.launch {
+            val id = _activeId.value ?: return@launch
+            val conversation = store.snapshot().firstOrNull { it.id == id } ?: return@launch
+            val sessionId = conversation.sessionId ?: run {
+                _error.value = "This conversation does not have a file-backed session."
+                return@launch
+            }
+            val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: run {
+                _error.value = "The Storage folder for this session is unavailable."
+                return@launch
+            }
+            try {
+                val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                val backup = fileSessionStore.repairMemory(files.memoryUri)
+                _toast.value = "memory.md repaired. Backup created: " + backup.substringAfterLast('/')
+            } catch (e: Exception) {
+                _error.value = "Could not repair memory.md: " + (e.message ?: "unknown error")
+            }
+        }
+    }
+
+    fun createActiveHistoryTemplate() {
+        if (_isStreaming.value) return
+        viewModelScope.launch {
+            val id = _activeId.value ?: return@launch
+            val conversation = store.snapshot().firstOrNull { it.id == id } ?: return@launch
+            val sessionId = conversation.sessionId ?: run {
+                _error.value = "This conversation does not have a file-backed session."
+                return@launch
+            }
+            if (conversation.messages.isNotEmpty()) {
+                _error.value = "This session already has cached messages. Repair history.md instead of replacing it with a template."
+                return@launch
+            }
+            val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: run {
+                _error.value = "The Storage folder for this session is unavailable."
+                return@launch
+            }
+            try {
+                val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                if (fileSessionStore.readText(files.historyUri).isNotBlank()) {
+                    _error.value = "history.md is not empty. Use Repair history instead of replacing existing content."
+                    return@launch
+                }
+                fileSessionStore.createHistoryTemplate(files.historyUri, sessionId, conversation.title)
+                _toast.value = "A valid history.md template was created."
+            } catch (e: Exception) {
+                _error.value = "Could not create history.md template: " + (e.message ?: "unknown error")
+            }
+        }
+    }
 
     fun newConversation(): String {
         val id = newId()
@@ -427,6 +555,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 null
             }
+            var historyDocument: HistoryDocument? = null
+            if (sessionFiles != null && sessionId != null) {
+                try {
+                    val rawHistory = fileSessionStore.readText(sessionFiles.historyUri)
+                    historyDocument = HistoryMd.parse(rawHistory, sessionId, existing?.title ?: baseTitle)
+                    // Build B created empty history.md files before transcript persistence existed.
+                    // Seed only a truly empty file from that same session's existing DataStore cache.
+                    if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty()) {
+                        historyDocument = historyDocument!!.copy(
+                            title = existing!!.title,
+                            createdAt = existing.createdAt,
+                            nextTurn = maxOf(existing.nextTurnNo, (existing.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                            messages = HistoryMd.completedMessages(existing.messages)
+                        )
+                        fileSessionStore.writeText(sessionFiles.historyUri, HistoryMd.render(historyDocument!!))
+                    }
+                } catch (e: HistoryFormatException) {
+                    _error.value = "History file has a problem: " + e.message + " Repair history.md before sending."
+                    return@launch
+                } catch (e: Exception) {
+                    _error.value = "Could not read history.md: " + (e.message ?: "unknown error")
+                    return@launch
+                }
+            }
             val layout = sessionFiles?.let { layoutWithSessionMemory(requestedLayout, it) } ?: requestedLayout
             val workspaceRepository = workspaceRepositoryFor(current)
             val toolsSetup = try {
@@ -443,6 +595,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             // Old chats get their turn numbers here, once. The counter only goes up.
             val baseConversation = (existing ?: Conversation(id = activeId, title = baseTitle, messages = emptyList()))
                 .copy(
+                    title = historyDocument?.title ?: (existing?.title ?: baseTitle),
+                    messages = historyDocument?.messages ?: existing?.messages.orEmpty(),
+                    nextTurnNo = historyDocument?.nextTurn ?: existing?.nextTurnNo ?: 1,
+                    createdAt = historyDocument?.createdAt ?: existing?.createdAt ?: System.currentTimeMillis(),
                     sessionId = sessionId ?: existing?.sessionId,
                     sessionStorageUri = sessionStorageUri ?: existing?.sessionStorageUri
                 )
@@ -472,7 +628,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             // The request is built from the cards of the Request Control Panel.
             val requestBuilder = makeRequestBuilder(workspaceRepository, model, provider.name)
             val historyForApi: MutableList<ChatMessage> = try {
-                requestBuilder.build(layout, updated.messages).toMutableList()
+                val historyCard = layout.cards.first { it.role == CardRole.HISTORY }
+                val messagesForRequest = if (historyCard.historyCompact) {
+                    updated.messages
+                } else {
+                    expandCompactToolResults(updated.messages, workspaceRepository, current, toolsSetup)
+                }
+                requestBuilder.build(layout, messagesForRequest).toMutableList()
             } catch (e: Exception) {
                 _error.value = e.message ?: "Could not build the request."
                 return@launch
@@ -490,6 +652,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             streamingJob = launch {
                 var lastFlush = 0L
                 val flushIntervalMs = 250L
+                var turnSucceeded = false
+                var finalToolRounds: List<ToolRound> = emptyList()
+                var finalExtraContent: JsonObject? = null
                 _streamingOverlay.value = assistantId to ""
                 try {
                     if (workspaceRepository != null && toolsSetup.mode != "none") {
@@ -548,13 +713,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         // Everything the agent added after the first request messages, minus the final answer.
                         val toolRounds = buildToolRounds(
                             generated = result.transcript.drop(initialCount).dropLast(1),
-                            turnNo = turnNo
+                            turnNo = turnNo,
+                            workspaceUri = current.workspaceTreeUri
                         )
-                        appendAssistant(
-                            activeId, assistantId, builder.toString(),
-                            result.finalMessage.extraContent,
-                            toolRounds
-                        )
+                        finalToolRounds = toolRounds
+                        finalExtraContent = result.finalMessage.extraContent
+                        if (sessionFiles == null) {
+                            appendAssistant(
+                                activeId, assistantId, builder.toString(),
+                                result.finalMessage.extraContent,
+                                toolRounds
+                            )
+                        }
                     } else {
                         client.chatStream(
                             provider = provider,
@@ -570,7 +740,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 _streamingOverlay.value = assistantId to shown(builder.toString())
                                 // 2) throttled DataStore flush
                                 val now = System.currentTimeMillis()
-                                if (now - lastFlush >= flushIntervalMs) {
+                                if (sessionFiles == null && now - lastFlush >= flushIntervalMs) {
                                     appendAssistant(activeId, assistantId, shown(builder.toString()))
                                     lastFlush = now
                                 }
@@ -581,16 +751,60 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             builder.append(processed)
                             _streamingOverlay.value = assistantId to processed
                         }
+                        finalExtraContent = streamExtraContent
                     }
+                    turnSucceeded = true
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
                     _error.value = e.message ?: "Request failed"
-                    if (builder.isEmpty()) builder.append("(error: ${e.message ?: "Request failed"})")
-                    appendAssistant(activeId, assistantId, builder.toString())
+                    if (sessionFiles == null) {
+                        if (builder.isEmpty()) builder.append("(error: ${e.message ?: "Request failed"})")
+                        appendAssistant(activeId, assistantId, builder.toString())
+                    }
                 } finally {
-                    if (builder.isNotEmpty()) {
-                        appendAssistant(activeId, assistantId, shown(builder.toString()), streamExtraContent)
+                    if (sessionFiles == null) {
+                        if (builder.isNotEmpty()) {
+                            appendAssistant(activeId, assistantId, shown(builder.toString()), streamExtraContent)
+                        }
+                    } else {
+                        try {
+                            if (turnSucceeded) {
+                                // Re-read immediately before writing so edits made during the request survive.
+                                val latestText = fileSessionStore.readText(sessionFiles.historyUri)
+                                val latest = HistoryMd.parse(latestText, sessionId!!, baseTitle)
+                                val persistedTurn = maxOf(turnNo, latest.nextTurn)
+                                val persistedUser = userMsg.copy(turnNo = persistedTurn)
+                                val finalAssistant = Message(
+                                    id = assistantId,
+                                    role = "assistant",
+                                    content = shown(builder.toString()),
+                                    createdAt = System.currentTimeMillis(),
+                                    extraContent = finalExtraContent,
+                                    toolRounds = finalToolRounds
+                                )
+                                val combined = latest.messages + persistedUser + finalAssistant
+                                val document = latest.copy(
+                                    title = if (latest.messages.isEmpty()) baseTitle else latest.title,
+                                    nextTurn = persistedTurn + 1,
+                                    messages = combined
+                                )
+                                fileSessionStore.writeText(sessionFiles.historyUri, HistoryMd.render(document))
+                                val persistedConversation = baseConversation.copy(
+                                    title = document.title,
+                                    messages = combined,
+                                    nextTurnNo = document.nextTurn,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                                store.upsert(persistedConversation)
+                            } else {
+                                // Failed or cancelled turns are never committed to history.
+                                store.upsert(baseConversation)
+                            }
+                        } catch (e: Exception) {
+                            _error.value = "The reply completed, but history.md could not be saved: " + (e.message ?: "unknown error")
+                            store.upsert(baseConversation)
+                        }
                     }
                     _streamingOverlay.value = null
                     _isStreaming.value = false
@@ -673,6 +887,87 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (it.id == messageId) it.copy(content = newContent) else it
             }
             store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    /**
+     * In full-history mode, compact read-only results are refreshed from the same Workspace
+     * before being sent. Mutating tools are never replayed. Older rounds without a recorded
+     * Workspace are rejected rather than being read from an unrelated folder.
+     */
+    private suspend fun expandCompactToolResults(
+        messages: List<Message>,
+        workspaceRepository: SafFileRepository?,
+        current: AppSettings,
+        toolsSetup: ToolsSetup
+    ): List<Message> {
+        val readOnly = setOf("list_files", "search_files", "search_content", "read_file", "get_file_info")
+        val needsReplay = messages.any { message ->
+            message.role == "assistant" && message.toolRounds.any { round ->
+                round.results.any { result ->
+                    if (result.compact == null) false
+                    else {
+                        val call = round.toolCalls.firstOrNull { it.id == result.toolCallId }
+                        val uid = call?.let { toolsSetup.nameToUid[it.name] ?: it.name }
+                        uid != null && uid in readOnly
+                    }
+                }
+            }
+        }
+        if (!needsReplay) return messages
+        val repository = workspaceRepository
+            ?: throw RequestBuildException("Full History mode needs the session's original Workspace to refresh compact tool results.")
+        if (toolsSetup.mode == "none") {
+            throw RequestBuildException("Full History mode cannot refresh tool results while the Tools card is disabled.")
+        }
+        val enabledTools = buildSet {
+            if (current.toolListFilesEnabled) add("list_files")
+            if (current.toolSearchFilesEnabled) add("search_files")
+            if (current.toolSearchContentEnabled) add("search_content")
+            if (current.toolReadFileEnabled) add("read_file")
+            if (current.toolGetFileInfoEnabled) add("get_file_info")
+        }
+        val registry = MarkdownFileTools.registry(
+            repository = repository,
+            allowCreate = false,
+            allowEdit = false,
+            enabledTools = enabledTools,
+            maxChunkBytes = current.agentMaxFileReadKb * 1_000,
+            confirmLargeRead = { path, sizeBytes, limit -> confirmLargeFileRead(path, sizeBytes, limit) },
+            exposed = toolsSetup.exposed
+        )
+        return messages.map { message ->
+            if (message.role != "assistant" || message.toolRounds.isEmpty()) message
+            else message.copy(toolRounds = message.toolRounds.map { round ->
+                val refreshed = round.results.map { result ->
+                    if (result.compact == null) result
+                    else {
+                        val call = round.toolCalls.firstOrNull { it.id == result.toolCallId }
+                        val uid = call?.let { toolsSetup.nameToUid[it.name] ?: it.name }
+                        if (call == null || uid == null || uid !in readOnly) {
+                            result.copy(content = result.compact ?: result.content)
+                        } else {
+                            if (round.workspaceUri.isNullOrBlank() || round.workspaceUri != current.workspaceTreeUri) {
+                                throw RequestBuildException(
+                                    "Cannot refresh compact result for tool '" + call.name +
+                                        "': the current Workspace differs from the Workspace recorded for that turn."
+                                )
+                            }
+                            if (uid !in enabledTools) {
+                                throw RequestBuildException("Cannot refresh compact result because tool '" + call.name + "' is disabled in Settings.")
+                            }
+                            val arguments = runCatching {
+                                Json.parseToJsonElement(call.arguments).jsonObject
+                            }.getOrElse {
+                                throw RequestBuildException("Cannot refresh compact result: invalid arguments for tool '" + call.name + "'.")
+                            }
+                            val full = registry.execute(call.name, arguments)
+                            result.copy(content = full)
+                        }
+                    }
+                }
+                round.copy(results = refreshed)
+            })
         }
     }
 

@@ -48,7 +48,9 @@ data class ToolRound(
     val content: String = "",
     @SerialName("tool_calls") val toolCalls: List<StoredToolCall> = emptyList(),
     val results: List<StoredToolResult> = emptyList(),
-    @SerialName("extra_content") val extraContent: JsonObject? = null
+    @SerialName("extra_content") val extraContent: JsonObject? = null,
+    /** Workspace tree URI in which these tool calls were executed; required before replaying reads. */
+    @SerialName("workspace_uri") val workspaceUri: String? = null
 )
 
 @Serializable

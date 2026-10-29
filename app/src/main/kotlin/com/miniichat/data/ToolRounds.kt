@@ -39,7 +39,7 @@ private class RoundDraft(
  * tool results, without the first request messages and without the final answer)
  * into storable rounds.
  */
-fun buildToolRounds(generated: List<ChatMessage>, turnNo: Int?): List<ToolRound> {
+fun buildToolRounds(generated: List<ChatMessage>, turnNo: Int?, workspaceUri: String? = null): List<ToolRound> {
     val drafts = mutableListOf<RoundDraft>()
     for (message in generated) {
         val calls = message.toolCalls
@@ -67,7 +67,8 @@ fun buildToolRounds(generated: List<ChatMessage>, turnNo: Int?): List<ToolRound>
             content = draft.content,
             toolCalls = draft.calls,
             results = ordered,
-            extraContent = draft.extraContent
+            extraContent = draft.extraContent,
+            workspaceUri = workspaceUri
         )
     }
 }

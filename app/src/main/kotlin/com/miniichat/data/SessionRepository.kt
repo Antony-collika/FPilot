@@ -36,4 +36,10 @@ data class SessionFiles(
 
 interface SessionFilesRepository {
     suspend fun ensureSession(storageTreeUri: String, sessionId: String): SessionFiles
+    suspend fun readText(uriString: String): String
+    suspend fun writeText(uriString: String, text: String)
+    suspend fun backupFile(uriString: String): String
+    suspend fun repairHistory(uriString: String, sessionId: String, title: String = "New chat"): String
+    suspend fun repairMemory(uriString: String): String
+    suspend fun createHistoryTemplate(uriString: String, sessionId: String, title: String = "New chat")
 }
