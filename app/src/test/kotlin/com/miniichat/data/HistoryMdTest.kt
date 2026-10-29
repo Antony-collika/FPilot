@@ -178,4 +178,29 @@ broken
             assertTrue(error.message!!.contains("missing from history.meta.json"))
         }
     }
+
+    @Test
+    fun retainedSidecarKeepsDeletedMessageMetadataUntilMarkdownCommit() {
+        val original = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Before",
+            createdAt = 100,
+            nextTurn = 2,
+            messages = listOf(
+                Message("u1", "user", "question", createdAt = 1, turnNo = 1),
+                Message("a1", "assistant", "answer", createdAt = 2)
+            )
+        )
+        val edited = original.copy(messages = listOf(original.messages.last()))
+
+        val retained = HistoryMeta.parse(
+            HistoryMeta.renderRetainingPrevious(HistoryMeta.render(original), edited),
+            original.sessionId
+        )
+        val committed = HistoryMeta.parse(HistoryMeta.render(edited), original.sessionId)
+
+        assertTrue(retained.messages.containsKey("u1"))
+        assertTrue(retained.messages.containsKey("a1"))
+        assertFalse(committed.messages.containsKey("u1"))
+    }
 }
