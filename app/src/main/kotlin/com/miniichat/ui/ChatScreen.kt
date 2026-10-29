@@ -312,7 +312,7 @@ private fun ChatTopBar(
             }
             if (hasFileSession) {
                 IconButton(onClick = onRepairHistory) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Repair history.md",
+                    Icon(Icons.Default.Refresh, contentDescription = "Repair active history branch",
                         tint = MaterialTheme.colorScheme.onSurface)
                 }
                 IconButton(onClick = onRepairMemory) {
@@ -320,7 +320,7 @@ private fun ChatTopBar(
                         tint = MaterialTheme.colorScheme.onSurface)
                 }
                 IconButton(onClick = onCreateHistoryTemplate) {
-                    Icon(Icons.Default.Add, contentDescription = "Create history.md template",
+                    Icon(Icons.Default.Add, contentDescription = "Create active history branch template",
                         tint = MaterialTheme.colorScheme.onSurface)
                 }
             }

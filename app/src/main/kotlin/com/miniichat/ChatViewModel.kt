@@ -540,7 +540,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 ))
                 _toast.value = "Active history branch repaired. Backup created: " + backup.substringAfterLast('/')
             } catch (e: Exception) {
-                _error.value = "Could not repair history.md: " + (e.message ?: "unknown error")
+                _error.value = "Could not repair the active history branch: " + (e.message ?: "unknown error")
             }
         }
     }
@@ -578,7 +578,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             if (conversation.messages.isNotEmpty()) {
-                _error.value = "This session already has cached messages. Repair history.md instead of replacing it with a template."
+                _error.value = "This session already has cached messages. Repair the active history branch instead of replacing it with a template."
                 return@launch
             }
             val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: run {
@@ -601,7 +601,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 ))
                 _toast.value = "A valid history branch template was created."
             } catch (e: Exception) {
-                _error.value = "Could not create history.md template: " + (e.message ?: "unknown error")
+                _error.value = "Could not create an active history branch template: " + (e.message ?: "unknown error")
             }
         }
     }
@@ -805,10 +805,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             .copy(branchId = sessionFiles.activeBranchId)
                     }
                 } catch (e: HistoryFormatException) {
-                    _error.value = "History file has a problem: " + e.message + " Repair history.md before sending."
+                    _error.value = "History file has a problem: " + e.message + " Repair the active history branch before sending."
                     return@launch
                 } catch (e: Exception) {
-                    _error.value = "Could not read history.md: " + (e.message ?: "unknown error")
+                    _error.value = "Could not read the active history branch: " + (e.message ?: "unknown error")
                     return@launch
                 }
             }
@@ -1050,7 +1050,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 store.upsert(baseConversation)
                             }
                         } catch (e: Exception) {
-                            _error.value = "The reply completed, but history.md could not be saved: " + (e.message ?: "unknown error")
+                            _error.value = "The reply completed, but the active history branch could not be saved: " + (e.message ?: "unknown error")
                             store.upsert(baseConversation)
                         }
                     }
@@ -1429,7 +1429,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (activeId != null && !_isStreaming.value) {
             val synchronized = historySyncMutex.withLock { syncHistoryFromFileLocked(activeId) }
             if (!synchronized) {
-                return "The request cannot be built yet:\nSession history could not be synchronized. Check history.md and retry."
+                return "The request cannot be built yet:\nSession history could not be synchronized. Check the active history branch and retry."
             }
         }
         val current = settings.value
