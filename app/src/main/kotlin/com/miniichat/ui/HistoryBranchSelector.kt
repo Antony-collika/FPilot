@@ -25,7 +25,7 @@ fun HistoryBranchSelector(
     val ordered = branches.sortedBy {
         it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE
     }
-    if (ordered.size <= 1) return
+    if (ordered.isEmpty()) return
     val selected = ordered.indexOfFirst { it.id == activeBranchId }.takeIf { it >= 0 } ?: 0
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = 2.dp),

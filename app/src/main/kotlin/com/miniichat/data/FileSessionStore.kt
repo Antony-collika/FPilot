@@ -28,6 +28,9 @@ class FileSessionStore(
     private fun branchIdFromFile(fileName: String): String {
         val number = BRANCH_FILE.matchEntire(fileName)?.groupValues?.get(1)?.toIntOrNull()
             ?: throw IOException("Invalid history branch file name: $fileName")
+        if (number < 1 || fileName != "history_branch_${number.toString().padStart(2, '0')}.md") {
+            throw IOException("Non-canonical history branch file name: $fileName")
+        }
         return "branch_" + number.toString().padStart(2, '0')
     }
 
@@ -104,8 +107,13 @@ class FileSessionStore(
                 createdAt = recovered.createdAt
             )
             if (metaChild == null) {
-                metaChild = findOrCreateFile(
+                val metadataUri = findOrCreateFile(
                     treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json"
+                )
+                metaChild = Child(
+                    DocumentsContract.getDocumentId(metadataUri),
+                    "history.meta.json",
+                    "application/json"
                 )
             }
             val builtMeta = runCatching {

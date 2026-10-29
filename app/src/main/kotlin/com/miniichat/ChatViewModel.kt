@@ -512,7 +512,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     // Legacy Markdown stores inline json-meta/json-round blocks and has no
                     // standalone message-ID line after each heading. Keep its legacy repair
                     // path until the transcript has been migrated successfully.
-                    val idLinked = Regex("(?m)^\\s*\\{\\s*\"id\"\\s*:").containsMatchIn(raw)
+                    val idLinked =
+                        Regex("""(?m)^## T[0-9]+ (user|assistant)\r?\n\s*\{\s*["]id["]\s*:""")
+                            .containsMatchIn(raw) &&
+                            !raw.lineSequence().any { it.trim() == "```json-meta" }
                     val repairMetadata = if (idLinked) {
                         files.historyMetaUri?.let { fileSessionStore.readText(it) }
                     } else {
