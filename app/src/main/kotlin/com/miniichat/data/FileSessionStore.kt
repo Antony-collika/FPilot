@@ -35,6 +35,7 @@ class FileSessionStore(
             val sessions = findOrCreateDirectory(treeUri, root, "sessions")
             val existing = listChildren(treeUri, sessions)
                 .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
+            val isNewSessionFolder = existing == null
             val folder = if (existing != null) {
                 DocumentsContract.buildDocumentUriUsingTree(treeUri, existing.id)
             } else {
@@ -45,11 +46,20 @@ class FileSessionStore(
 
             val history = findOrCreateFile(treeUri, folder, "history.md", "")
             val memory = findOrCreateFile(treeUri, folder, "memory.md", MemoryDoc.template())
+            // A sidecar is the format marker. Never add one to an existing session folder:
+            // sessions created before this refactor remain on their original on-disk format.
+            val metadata = if (isNewSessionFolder) {
+                findOrCreateFile(treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json")
+            } else {
+                listChildren(treeUri, folder).firstOrNull { !it.isDirectory && it.name == "history.meta.json" }
+                    ?.let { DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id) }
+            }
             SessionFiles(
                 sessionId = sessionId,
                 directoryName = folderName,
                 historyUri = history.toString(),
-                memoryUri = memory.toString()
+                memoryUri = memory.toString(),
+                historyMetaUri = metadata?.toString()
             )
         }
 
@@ -145,7 +155,7 @@ class FileSessionStore(
         ) ?: throw IOException("Could not create the folder \"$name\".")
     }
 
-    private fun findOrCreateFile(treeUri: Uri, parent: Uri, name: String, initialText: String): Uri {
+    private fun findOrCreateFile(treeUri: Uri, parent: Uri, name: String, initialText: String, mimeType: String = "text/markdown"): Uri {
         val found = listChildren(treeUri, parent).firstOrNull { it.name == name }
         if (found != null) {
             if (found.isDirectory) throw IOException("\"$name\" exists but is a folder.")
