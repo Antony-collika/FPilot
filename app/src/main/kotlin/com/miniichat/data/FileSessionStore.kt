@@ -179,21 +179,23 @@ class FileSessionStore(
         val activeChild = diskById[activeId] ?: throw IOException("The active history branch file is missing.")
         val activeUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, activeChild.id)
         val activeText = readText(activeUri.toString())
-        val normalizedText = runCatching {
+        val parsedActiveDocument = runCatching {
+            HistoryMd.parse(activeText, sessionId, "New chat", metadataText, activeId).copy(branchId = activeId)
+        }.getOrNull()
+        val normalizedText = if (parsedActiveDocument != null) {
             HistoryMeta.renderForBranch(
                 metadataText.orEmpty(),
-                HistoryMd.parse(activeText, sessionId, "New chat", metadataText, activeId).copy(branchId = activeId),
+                parsedActiveDocument,
                 activeId,
                 reconciledBranches,
                 normalized.nextBranchNumber
             )
-        }.getOrElse {
-            HistoryMeta.renderForBranch(
-                "",
-                HistoryMd.empty(sessionId, "New chat").copy(branchId = activeId),
-                activeId,
-                reconciledBranches,
-                normalized.nextBranchNumber
+        } else {
+            // Corrupted or truncated Markdown must not make its previous message inventory
+            // disappear from the sidecar; Repair needs that inventory to distinguish damage
+            // from an intentionally empty branch.
+            HistoryMeta.reconcileBranches(
+                metadataText.orEmpty(), sessionId, activeId, reconciledBranches, normalized.nextBranchNumber
             )
         }
         if (metadataText != normalizedText || currentMeta.version != 2 ||

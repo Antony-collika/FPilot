@@ -155,6 +155,37 @@ object HistoryMeta {
         )
     }
 
+    /** Update branch inventory without rewriting per-branch message membership. */
+    fun reconcileBranches(
+        previousText: String,
+        expectedSessionId: String,
+        activeBranchId: String,
+        branches: List<HistoryBranchMetadata>,
+        nextBranchNumber: Int
+    ): String {
+        val previous = runCatching { parse(previousText, expectedSessionId) }
+            .getOrElse { HistoryMetaDocument(session = expectedSessionId) }
+        val oldById = previous.branches.associateBy { it.id }
+        val mergedBranches = branches.map { branch ->
+            val old = oldById[branch.id]
+            if (branch.messageIds.isEmpty() && old?.messageIds?.isNotEmpty() == true) {
+                branch.copy(messageIds = old.messageIds)
+            } else branch
+        }
+        val maxNumber = mergedBranches.mapNotNull { it.id.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1
+        val selected = activeBranchId.takeIf { id -> mergedBranches.any { it.id == id } }
+            ?: mergedBranches.firstOrNull()?.id
+            ?: "branch_01"
+        return json.encodeToString(
+            previous.copy(
+                version = 2,
+                activeBranchId = selected,
+                branches = mergedBranches,
+                nextBranchNumber = maxOf(nextBranchNumber, maxNumber + 1, 2)
+            )
+        )
+    }
+
     fun setActiveBranch(previousText: String, expectedSessionId: String, branchId: String): String {
         val document = parse(previousText, expectedSessionId)
         require(document.branches.any { it.id == branchId }) { "Unknown history branch '$branchId'." }
