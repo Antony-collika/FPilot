@@ -75,8 +75,8 @@ interface SessionFilesRepository {
             val markdownRestoreFailure = runCatching {
                 writeText(files.historyUri, previousMarkdown)
             }.exceptionOrNull()
-            metadataRestoreFailure?.let(failure::addSuppressed)
-            markdownRestoreFailure?.let(failure::addSuppressed)
+            metadataRestoreFailure?.let { failure.addSuppressed(it) }
+            markdownRestoreFailure?.let { failure.addSuppressed(it) }
             throw failure
         }
     }
