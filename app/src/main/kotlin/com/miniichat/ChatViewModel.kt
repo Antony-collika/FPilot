@@ -284,35 +284,95 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Must be called under historySyncMutex. A blank legacy session file is seeded once. */
+    /** Merge cache-only fields by stable message ID; Markdown owns message text and order. */
+    private fun mergeHistoryMetadataFromCache(
+        document: HistoryDocument,
+        cachedMessages: List<Message>
+    ): HistoryDocument {
+        val cachedById = cachedMessages.associateBy { it.id }
+        return document.copy(
+            messages = document.messages.map { message ->
+                val cached = cachedById[message.id]
+                if (cached == null) {
+                    message.copy(branchId = message.branchId ?: document.branchId)
+                } else {
+                    message.copy(
+                        attachments = cached.attachments,
+                        createdAt = cached.createdAt,
+                        extraContent = cached.extraContent ?: message.extraContent,
+                        toolRounds = cached.toolRounds.ifEmpty { message.toolRounds },
+                        branchId = message.branchId ?: cached.branchId ?: document.branchId
+                    )
+                }
+            }
+        )
+    }
+
+    private fun branchListFor(files: SessionFiles, messages: List<Message>): List<HistoryBranchMetadata> =
+        files.branches.map { branch ->
+            if (branch.id == files.activeBranchId) branch.copy(messageIds = messages.map { it.id }) else branch
+        }
+
+    /** Must be called under historySyncMutex. Markdown is the source of truth on resume. */
     private suspend fun syncHistoryFromFileLocked(id: String): Boolean {
         val conversation = store.snapshot().firstOrNull { it.id == id } ?: return true
         val sessionId = conversation.sessionId ?: return true
         val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return true
         return try {
             val files = fileSessionStore.ensureSession(storageUri, sessionId)
-            val raw = fileSessionStore.readText(files.historyUri)
-            // Validate the sidecar even when history.md is blank, so a truncated Markdown
-            // file cannot cause valid sidecar-backed messages to be replaced from cache.
             val parsedDocument = fileSessionStore.readHistory(files, conversation.title)
-            val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
-                HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
-                    nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                    messages = HistoryMd.completedMessages(conversation.messages)
-                ).also { fileSessionStore.writeHistory(files, it) }
-            } else {
-                parsedDocument
-            }
+            val document = mergeHistoryMetadataFromCache(parsedDocument, conversation.messages)
+                .copy(branchId = files.activeBranchId)
+            fileSessionStore.syncHistoryMetadata(files, document)
             store.upsert(conversation.copy(
                 title = document.title,
                 messages = document.messages,
-                nextTurnNo = document.nextTurn,
-                createdAt = document.createdAt
+                nextTurnNo = maxOf(document.nextTurn, (document.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                createdAt = document.createdAt,
+                activeBranchId = files.activeBranchId,
+                historyBranches = branchListFor(files, document.messages)
             ))
             true
         } catch (e: Exception) {
             _error.value = "Could not load session history: " + (e.message ?: "unknown error")
             false
+        }
+    }
+
+    /** Switches the entire conversation atomically from the UI's perspective. */
+    fun switchActiveBranch(branchId: String) {
+        if (isBusy()) return
+        val id = _activeId.value ?: return
+        viewModelScope.launch {
+            historySyncMutex.withLock {
+                val current = store.snapshot().firstOrNull { it.id == id } ?: return@withLock
+                val sessionId = current.sessionId
+                val storageUri = current.sessionStorageUri?.takeIf { it.isNotBlank() }
+                if (sessionId == null || storageUri == null) {
+                    _error.value = "This conversation does not have file-backed branch history."
+                    return@withLock
+                }
+                try {
+                    val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                    if (files.activeBranchId == branchId) return@withLock
+                    val switched = fileSessionStore.switchHistoryBranch(files, branchId)
+                    val parsed = fileSessionStore.readHistory(switched, current.title)
+                    val document = mergeHistoryMetadataFromCache(parsed, current.messages)
+                        .copy(branchId = switched.activeBranchId)
+                    fileSessionStore.syncHistoryMetadata(switched, document)
+                    store.upsert(current.copy(
+                        title = document.title,
+                        messages = document.messages,
+                        nextTurnNo = maxOf(document.nextTurn, (document.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                        createdAt = document.createdAt,
+                        activeBranchId = switched.activeBranchId,
+                        historyBranches = branchListFor(switched, document.messages),
+                        updatedAt = System.currentTimeMillis()
+                    ))
+                } catch (e: Exception) {
+                    _error.value = "Could not switch history branch: " + (e.message ?: "unknown error")
+                }
+            }
         }
     }
 
@@ -334,35 +394,33 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 try {
                     val files = fileSessionStore.ensureSession(storageUri, sessionId)
-                    val raw = fileSessionStore.readText(files.historyUri)
                     val parsedLatestDocument = fileSessionStore.readHistory(files, current.title)
-                    val latestDocument = if (raw.isBlank() && current.messages.isNotEmpty()) {
-                        HistoryMd.empty(sessionId, current.title, current.createdAt).copy(
-                            nextTurn = maxOf(current.nextTurnNo, (current.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                            messages = HistoryMd.completedMessages(current.messages)
-                        )
-                    } else {
-                        parsedLatestDocument
-                    }
+                    val latestDocument = mergeHistoryMetadataFromCache(parsedLatestDocument, current.messages)
+                        .copy(branchId = files.activeBranchId)
                     val latest = current.copy(
                         title = latestDocument.title,
                         messages = latestDocument.messages,
                         nextTurnNo = latestDocument.nextTurn,
-                        createdAt = latestDocument.createdAt
+                        createdAt = latestDocument.createdAt,
+                        activeBranchId = files.activeBranchId,
+                        historyBranches = branchListFor(files, latestDocument.messages)
                     )
                     val updated = transform(latest).copy(updatedAt = System.currentTimeMillis())
                     val updatedDocument = latestDocument.copy(
                         title = updated.title,
                         nextTurn = maxOf(updated.nextTurnNo, (updated.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                        messages = HistoryMd.completedMessages(updated.messages)
+                        messages = HistoryMd.completedMessages(updated.messages),
+                        branchId = files.activeBranchId
                     )
                     fileSessionStore.writeHistory(files, updatedDocument)
                     val verified = fileSessionStore.readHistory(files, updated.title)
                     store.upsert(updated.copy(
                         title = verified.title,
-                        messages = verified.messages,
+                        messages = mergeHistoryMetadataFromCache(verified, updated.messages).messages,
                         nextTurnNo = verified.nextTurn,
-                        createdAt = verified.createdAt
+                        createdAt = verified.createdAt,
+                        activeBranchId = files.activeBranchId,
+                        historyBranches = branchListFor(files, verified.messages)
                     ))
                     onComplete(true)
                 } catch (e: Exception) {
@@ -389,33 +447,57 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val files = fileSessionStore.ensureSession(storageUri, sessionId)
                 val raw = fileSessionStore.readText(files.historyUri)
-                if (raw.isBlank()) {
-                    // A blank Markdown file with non-empty sidecar metadata is corruption,
-                    // not an empty history to be silently reseeded from cache.
-                    fileSessionStore.readHistory(files, conversation.title)
-                }
+                val branchInventory = files.branches.firstOrNull { it.id == files.activeBranchId }?.messageIds.orEmpty()
                 val backup = fileSessionStore.backupFile(files.historyUri)
-                val repairedDocument = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
-                    HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
-                        nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                        messages = HistoryMd.completedMessages(conversation.messages)
-                    )
+                val repairedDocument = if (raw.isBlank()) {
+                    val cachedById = conversation.messages.associateBy { it.id }
+                    if (branchInventory.isNotEmpty()) {
+                        val missingIds = branchInventory.filterNot { cachedById.containsKey(it) }
+                        if (missingIds.isNotEmpty() || conversation.activeBranchId?.let { it != files.activeBranchId } == true) {
+                            throw IllegalStateException(
+                                "The active Markdown branch is blank and the cached conversation cannot restore all of its messages. " +
+                                    "The backup was kept; no history was overwritten."
+                            )
+                        }
+                        HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                            nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                            messages = branchInventory.mapNotNull { cachedById[it] },
+                            branchId = files.activeBranchId
+                        )
+                    } else {
+                        HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                            nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                            branchId = files.activeBranchId
+                        )
+                    }
                 } else {
-                    HistoryMd.repair(
-                        raw, sessionId, conversation.title,
+                    // Legacy Markdown stores inline json-meta/json-round blocks and has no
+                    // standalone message-ID line after each heading. Keep its legacy repair
+                    // path until the transcript has been migrated successfully.
+                    val idLinked = Regex("(?m)^\\s*\\{\\s*\"id\"\\s*:").containsMatchIn(raw)
+                    val repairMetadata = if (idLinked) {
                         files.historyMetaUri?.let { fileSessionStore.readText(it) }
-                    )
+                    } else {
+                        null
+                    }
+                    HistoryMd.repair(
+                        raw, sessionId, conversation.title, repairMetadata
+                    ).copy(branchId = files.activeBranchId)
                 }
-                fileSessionStore.writeHistory(files, repairedDocument)
+                val withCachedMetadata = mergeHistoryMetadataFromCache(repairedDocument, conversation.messages)
+                fileSessionStore.writeHistory(files, withCachedMetadata)
                 val repaired = fileSessionStore.readHistory(files, conversation.title)
+                val finalDocument = mergeHistoryMetadataFromCache(repaired, conversation.messages)
                 store.upsert(conversation.copy(
-                    title = repaired.title,
-                    messages = repaired.messages,
-                    nextTurnNo = repaired.nextTurn,
-                    createdAt = repaired.createdAt,
+                    title = finalDocument.title,
+                    messages = finalDocument.messages,
+                    nextTurnNo = finalDocument.nextTurn,
+                    createdAt = finalDocument.createdAt,
+                    activeBranchId = files.activeBranchId,
+                    historyBranches = branchListFor(files, finalDocument.messages),
                     updatedAt = System.currentTimeMillis()
                 ))
-                _toast.value = "history.md repaired. Backup created: " + backup.substringAfterLast('/')
+                _toast.value = "Active history branch repaired. Backup created: " + backup.substringAfterLast('/')
             } catch (e: Exception) {
                 _error.value = "Could not repair history.md: " + (e.message ?: "unknown error")
             }
@@ -465,11 +547,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val files = fileSessionStore.ensureSession(storageUri, sessionId)
                 if (fileSessionStore.readText(files.historyUri).isNotBlank()) {
-                    _error.value = "history.md is not empty. Use Repair history instead of replacing existing content."
+                    _error.value = "The active history branch is not empty. Use Repair history instead of replacing existing content."
                     return@launch
                 }
-                fileSessionStore.writeHistory(files, HistoryMd.empty(sessionId, conversation.title))
-                _toast.value = "A valid history.md template was created."
+                fileSessionStore.writeHistory(
+                    files,
+                    HistoryMd.empty(sessionId, conversation.title).copy(branchId = files.activeBranchId)
+                )
+                store.upsert(conversation.copy(
+                    activeBranchId = files.activeBranchId,
+                    historyBranches = branchListFor(files, emptyList())
+                ))
+                _toast.value = "A valid history branch template was created."
             } catch (e: Exception) {
                 _error.value = "Could not create history.md template: " + (e.message ?: "unknown error")
             }
@@ -585,7 +674,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendMessage(text: String, attachments: List<com.miniichat.data.Attachment> = emptyList()) {
+    fun sendMessage(
+        text: String,
+        attachments: List<com.miniichat.data.Attachment> = emptyList(),
+        regenerateMessage: Message? = null
+    ) {
         // Reject re-entrant sends while a stream is in flight (debounce double-tap)
         if (_isStreaming.value || streamingJob?.isActive == true) return
         val trimmed = text.trim()
@@ -652,16 +745,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val rawHistory = fileSessionStore.readText(sessionFiles.historyUri)
                     historyDocument = fileSessionStore.readHistory(sessionFiles, existing?.title ?: baseTitle)
-                    // Build B created empty history.md files before transcript persistence existed.
-                    // Seed only a truly empty file from that same session's existing DataStore cache.
-                    if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty()) {
-                        historyDocument = historyDocument!!.copy(
-                            title = existing!!.title,
-                            createdAt = existing.createdAt,
+                    // A blank branch may be seeded from cache only when the cache belongs to
+                    // that same branch. Never copy another branch into an intentionally empty one.
+                    if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty() &&
+                        (existing?.activeBranchId == sessionFiles.activeBranchId ||
+                            (existing?.activeBranchId == null && sessionFiles.activeBranchId == "branch_01")) &&
+                        sessionFiles.branches.firstOrNull { it.id == sessionFiles.activeBranchId }?.messageIds.isNullOrEmpty()
+                    ) {
+                        historyDocument = HistoryMd.empty(sessionId, existing!!.title, existing.createdAt).copy(
                             nextTurn = maxOf(existing.nextTurnNo, (existing.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                            messages = HistoryMd.completedMessages(existing.messages)
+                            messages = HistoryMd.completedMessages(existing.messages).map {
+                                it.copy(branchId = it.branchId ?: sessionFiles.activeBranchId)
+                            },
+                            branchId = sessionFiles.activeBranchId
                         )
                         fileSessionStore.writeHistory(sessionFiles, historyDocument!!)
+                    } else {
+                        historyDocument = mergeHistoryMetadataFromCache(historyDocument!!, existing?.messages.orEmpty())
+                            .copy(branchId = sessionFiles.activeBranchId)
                     }
                 } catch (e: HistoryFormatException) {
                     _error.value = "History file has a problem: " + e.message + " Repair history.md before sending."
@@ -692,20 +793,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     nextTurnNo = historyDocument?.nextTurn ?: existing?.nextTurnNo ?: 1,
                     createdAt = historyDocument?.createdAt ?: existing?.createdAt ?: System.currentTimeMillis(),
                     sessionId = sessionId ?: existing?.sessionId,
-                    sessionStorageUri = sessionStorageUri ?: existing?.sessionStorageUri
+                    sessionStorageUri = sessionStorageUri ?: existing?.sessionStorageUri,
+                    activeBranchId = sessionFiles?.activeBranchId ?: existing?.activeBranchId,
+                    historyBranches = sessionFiles?.let { branchListFor(it, historyDocument?.messages ?: existing?.messages.orEmpty()) }
+                        ?: existing?.historyBranches.orEmpty()
                 )
                 .withTurnNumbers()
-            val turnNo = baseConversation.nextTurnNo
+            val turnNo = regenerateMessage?.turnNo ?: baseConversation.nextTurnNo
 
+            val activeBranchId = sessionFiles?.activeBranchId ?: baseConversation.activeBranchId
             val userMsg = Message(
-                id = newId(),
+                id = regenerateMessage?.id ?: newId(),
                 role = "user",
                 content = trimmed,
                 attachments = attachments,
-                turnNo = turnNo
+                createdAt = regenerateMessage?.createdAt ?: System.currentTimeMillis(),
+                extraContent = regenerateMessage?.extraContent,
+                turnNo = turnNo,
+                toolRounds = regenerateMessage?.toolRounds.orEmpty(),
+                branchId = regenerateMessage?.branchId ?: activeBranchId
             )
             val assistantId = newId()
-            val assistantPlaceholder = Message(id = assistantId, role = "assistant", content = "")
+            val assistantPlaceholder = Message(
+                id = assistantId, role = "assistant", content = "", branchId = activeBranchId
+            )
 
             val updated = baseConversation
                 .let { conv ->
@@ -872,19 +983,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     content = shown(builder.toString()),
                                     createdAt = System.currentTimeMillis(),
                                     extraContent = finalExtraContent,
-                                    toolRounds = finalToolRounds
+                                    toolRounds = finalToolRounds,
+                                    branchId = sessionFiles.activeBranchId
                                 )
-                                val combined = latest.messages + persistedUser + finalAssistant
+                                val combined = latest.messages + persistedUser.copy(
+                                    branchId = persistedUser.branchId ?: sessionFiles.activeBranchId
+                                ) + finalAssistant
                                 val document = latest.copy(
                                     title = if (latest.messages.isEmpty()) baseTitle else latest.title,
                                     nextTurn = persistedTurn + 1,
-                                    messages = combined
+                                    messages = combined,
+                                    branchId = sessionFiles.activeBranchId
                                 )
                                 fileSessionStore.writeHistory(sessionFiles, document)
                                 val persistedConversation = baseConversation.copy(
                                     title = document.title,
                                     messages = combined,
                                     nextTurnNo = document.nextTurn,
+                                    activeBranchId = sessionFiles.activeBranchId,
+                                    historyBranches = branchListFor(sessionFiles, combined),
                                     updatedAt = System.currentTimeMillis()
                                 )
                                 store.upsert(persistedConversation)
@@ -926,34 +1043,104 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun regenerate() {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val msgs = conv.messages
-            val lastUserIdx = msgs.indexOfLast { it.role == "user" }
-            if (lastUserIdx < 0) return@launch
-            val lastUser = msgs[lastUserIdx]
-            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
-            val trimmed = msgs.subList(0, lastUserIdx)
-            store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
-            sendMessage(lastUser.content, lastUser.attachments)
+            val index = conv.messages.indexOfLast { it.role == "user" }
+            if (index < 0) return@launch
+            regenerateAt(conv.id, conv.messages[index].id)
         }
     }
 
-    /** Branch from a specific user message — drops everything after it and re-sends. */
+    /** Regenerate from a selected user turn, preserving the source branch unchanged. */
     fun regenerateFrom(messageId: String) {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val msgs = conv.messages
-            val idx = msgs.indexOfFirst { it.id == messageId }
-            if (idx < 0) return@launch
-            val target = msgs[idx]
-            if (target.role != "user") return@launch
-            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
-            val trimmed = msgs.subList(0, idx)
-            store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
-            sendMessage(target.content, target.attachments)
+            regenerateAt(conv.id, messageId)
+        }
+    }
+
+    private suspend fun regenerateAt(conversationId: String, messageId: String) {
+        if (isBusy()) return
+        val snapshot = store.snapshot().firstOrNull { it.id == conversationId } ?: return
+        val targetCached = snapshot.messages.firstOrNull { it.id == messageId && it.role == "user" } ?: return
+        val currentSettings = settings.value
+        val provider = activeProvider()
+        if (provider == null) {
+            _error.value = "No provider configured."
+            return
+        }
+        if (currentSettings.activeModel.isBlank()) {
+            _error.value = "No model selected."
+            return
+        }
+        if (provider.apiKey.isBlank()
+            && !provider.baseUrl.contains("localhost")
+            && !provider.baseUrl.contains("10.0.2.2")
+        ) {
+            _error.value = "API key is empty for ${provider.name}."
+            return
+        }
+        val sessionId = snapshot.sessionId
+        val storageUri = snapshot.sessionStorageUri?.takeIf { it.isNotBlank() }
+
+        // Older DataStore-only chats do not have branch files; retain their existing behavior.
+        if (sessionId == null || storageUri == null) {
+            val index = snapshot.messages.indexOfFirst { it.id == messageId }
+            if (index < 0) return
+            store.upsert(snapshot.copy(
+                messages = snapshot.messages.take(index),
+                updatedAt = System.currentTimeMillis()
+            ))
+            sendMessage(targetCached.content, targetCached.attachments, targetCached)
+            return
+        }
+
+        try {
+            val target = historySyncMutex.withLock {
+                val current = store.snapshot().firstOrNull { it.id == conversationId }
+                    ?: throw IllegalStateException("Conversation no longer exists.")
+                val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                val diskDocument = fileSessionStore.readHistory(files, current.title)
+                val document = mergeHistoryMetadataFromCache(diskDocument, current.messages)
+                    .copy(branchId = files.activeBranchId)
+                val targetIndex = document.messages.indexOfFirst { it.id == messageId && it.role == "user" }
+                if (targetIndex < 0) {
+                    throw IllegalStateException(
+                        "The selected user message is no longer present in the active Markdown branch. " +
+                            "Reload the conversation before regenerating."
+                    )
+                }
+                val targetMessage = document.messages[targetIndex]
+                val prefixMessages = document.messages.take(targetIndex)
+                val prefixDocument = document.copy(
+                    messages = prefixMessages,
+                    nextTurn = targetMessage.turnNo
+                        ?: ((prefixMessages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                    branchId = files.activeBranchId
+                )
+                // Regenerate is the only operation that creates a new branch. The source
+                // Markdown is never truncated or overwritten.
+                val childFiles = fileSessionStore.createHistoryBranch(
+                    files, prefixDocument, parentBranchId = files.activeBranchId
+                )
+                store.upsert(current.copy(
+                    title = prefixDocument.title,
+                    messages = prefixMessages,
+                    nextTurnNo = prefixDocument.nextTurn,
+                    createdAt = prefixDocument.createdAt,
+                    activeBranchId = childFiles.activeBranchId,
+                    historyBranches = branchListFor(childFiles, prefixMessages),
+                    updatedAt = System.currentTimeMillis()
+                ))
+                targetMessage
+            }
+            sendMessage(target.content, target.attachments, target)
+        } catch (e: Exception) {
+            _error.value = "Could not create a new history branch: " + (e.message ?: "unknown error")
         }
     }
 

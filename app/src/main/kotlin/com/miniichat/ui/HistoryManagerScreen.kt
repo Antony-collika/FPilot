@@ -74,7 +74,8 @@ fun HistoryManagerScreen(
     onDeleteMessage: (String) -> Unit,
     onDeleteTurn: (String) -> Unit,
     onDeleteToolRound: (String, Int) -> Unit,
-    onEditToolResult: (String, Int, Int, String, (Boolean) -> Unit) -> Unit
+    onEditToolResult: (String, Int, Int, String, (Boolean) -> Unit) -> Unit,
+    onSwitchBranch: (String) -> Unit = {}
 ) {
     val turns = remember(conversation) { groupTurns(conversation?.messages.orEmpty()) }
     var editing by remember { mutableStateOf<EditRequest?>(null) }
@@ -115,6 +116,14 @@ fun HistoryManagerScreen(
                 val label = turn.user?.turnNo?.let { "T$it" } ?: "Turn"
                 SectionCard {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        if (conversation != null) {
+                            HistoryBranchSelector(
+                                branches = conversation.historyBranches,
+                                activeBranchId = conversation.activeBranchId,
+                                enabled = !isBusy,
+                                onSelect = onSwitchBranch
+                            )
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                             val userId = turn.user?.id

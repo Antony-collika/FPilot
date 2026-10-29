@@ -159,7 +159,7 @@ broken
     }
 
     @Test
-    fun sidecarFormatSupportsAnOrphanAssistantMessageAndRejectsMissingMetadata() {
+    fun sidecarFormatRecoversMessageIdsWhenMetadataIsMissingEntries() {
         val source = HistoryDocument(
             sessionId = "a3f9c1d2",
             title = "Orphan",
@@ -169,14 +169,81 @@ broken
         )
         val markdown = HistoryMd.render(source, sidecarFormat = true)
         val sidecar = HistoryMeta.render(source)
-        assertEquals(listOf("a1"), HistoryMd.parse(markdown, source.sessionId, source.title, sidecar).messages.map { it.id })
+        assertEquals(
+            listOf("a1"),
+            HistoryMd.parse(markdown, source.sessionId, source.title, sidecar).messages.map { it.id }
+        )
 
-        try {
-            HistoryMd.parse(markdown, source.sessionId, source.title, HistoryMeta.empty(source.sessionId))
-            throw AssertionError("Expected HistoryFormatException")
-        } catch (error: HistoryFormatException) {
-            assertTrue(error.message!!.contains("missing from history.meta.json"))
-        }
+        // Missing JSON is recoverable from the ID and message body in the editable Markdown.
+        val emptySidecar = HistoryMeta.empty(source.sessionId)
+        val repaired = HistoryMd.parse(markdown, source.sessionId, source.title, emptySidecar)
+        assertEquals(listOf("a1"), repaired.messages.map { it.id })
+        assertEquals("answer", repaired.messages.single().content)
+        assertEquals("a1", HistoryMd.parse(markdown, source.sessionId, source.title).messages.single().id)
+    }
+
+    @Test
+    fun oneSidecarTracksBranchMembershipAndGlobalActiveBranch() {
+        val source = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Branched",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 2,
+            branchId = "branch_02",
+            messages = listOf(
+                Message("u1", "user", "question", createdAt = 1, turnNo = 1, branchId = "branch_01"),
+                Message("a2", "assistant", "alternate answer", createdAt = 2, branchId = "branch_02")
+            )
+        )
+        val branches = listOf(
+            HistoryBranchMetadata("branch_01", "history_branch_01.md", null, 1, listOf("u1")),
+            HistoryBranchMetadata("branch_02", "history_branch_02.md", "branch_01", 2)
+        )
+        val sidecar = HistoryMeta.renderForBranch("", source, "branch_02", branches, 3)
+        val parsed = HistoryMeta.parse(sidecar, source.sessionId)
+
+        assertEquals(2, parsed.version)
+        assertEquals("branch_02", parsed.activeBranchId)
+        assertEquals(listOf("u1", "a2"), parsed.branches.first { it.id == "branch_02" }.messageIds)
+        assertEquals("branch_01", parsed.messages["u1"]!!.branchId)
+        assertEquals("branch_02", parsed.messages["a2"]!!.branchId)
+
+        // Editing branch 01 from disk updates its inventory but must not switch active branch 02.
+        val branchOne = source.copy(
+            branchId = "branch_01",
+            messages = listOf(source.messages.first(), Message("a1", "assistant", "original", createdAt = 3, branchId = "branch_01"))
+        )
+        val synced = HistoryMeta.syncBranchDocument(
+            sidecar, source.sessionId, branchOne, "branch_01", parsed.branches, parsed.nextBranchNumber
+        )
+        val after = HistoryMeta.parse(synced, source.sessionId)
+        assertEquals("branch_02", after.activeBranchId)
+        assertEquals(listOf("u1", "a1"), after.branches.first { it.id == "branch_01" }.messageIds)
+        assertEquals(listOf("u1", "a2"), after.branches.first { it.id == "branch_02" }.messageIds)
+    }
+
+    @Test
+    fun metadataRepairKeepsBranchInventoryWhenMarkdownIsCorrupt() {
+        val source = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Repair inventory",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 2,
+            branchId = "branch_02",
+            messages = listOf(Message("u1", "user", "question", createdAt = 1, turnNo = 1, branchId = "branch_01"))
+        )
+        val branches = listOf(
+            HistoryBranchMetadata("branch_01", "history_branch_01.md", null, 1, listOf("u1")),
+            HistoryBranchMetadata("branch_02", "history_branch_02.md", "branch_01", 2, listOf("u1"))
+        )
+        val sidecar = HistoryMeta.renderForBranch("", source, "branch_02", branches, 3)
+        val parsed = HistoryMeta.parse(sidecar, source.sessionId)
+        val reconciled = HistoryMeta.reconcileBranches(
+            sidecar, source.sessionId, "branch_02", parsed.branches, parsed.nextBranchNumber
+        )
+        val after = HistoryMeta.parse(reconciled, source.sessionId)
+        assertEquals(listOf("u1"), after.branches.first { it.id == "branch_02" }.messageIds)
+        assertEquals("branch_02", after.activeBranchId)
     }
 
     @Test

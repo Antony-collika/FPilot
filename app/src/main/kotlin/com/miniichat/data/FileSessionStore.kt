@@ -60,6 +60,12 @@ class FileSessionStore(
             readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
         }
         var metadata = metadataText?.let { runCatching { HistoryMeta.parse(it, sessionId) }.getOrNull() }
+        if (metadata == null && metaChild != null && !metadataText.isNullOrBlank()) {
+            // Preserve corrupt JSON before the application rebuilds it from Markdown.
+            runCatching {
+                backupFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, metaChild!!.id).toString())
+            }
+        }
 
         // Migrate the former history.md format into the first named branch. Keep the source
         // file as a recoverable backup; all future reads and writes use history_branch_NN.md.
@@ -70,18 +76,20 @@ class FileSessionStore(
             val legacyText = legacy?.let {
                 readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
             }.orEmpty()
-            val recovered = if (legacyText.isBlank()) {
+            val parsedLegacy = if (legacyText.isBlank()) {
                 HistoryMd.empty(sessionId, "New chat")
             } else {
                 runCatching {
                     HistoryMd.parse(legacyText, sessionId, "New chat", metadataText, "branch_01")
-                }.getOrElse {
-                    // Do not overwrite malformed source text. Repair can salvage valid blocks later.
-                    HistoryMd.empty(sessionId, "New chat")
-                }
-            }.copy(branchId = "branch_01")
-            if (legacyText.isBlank() || recovered.messages.isNotEmpty()) {
+                }.getOrNull()
+            }
+            val recovered = (parsedLegacy ?: HistoryMd.empty(sessionId, "New chat")).copy(branchId = "branch_01")
+            if (parsedLegacy != null || legacyText.isBlank()) {
                 writeText(branchUri.toString(), HistoryMd.render(recovered, sidecarFormat = true))
+            } else {
+                // Preserve malformed Markdown verbatim in the new active branch so Repair can
+                // salvage it. The original history.md is retained as an additional backup.
+                writeText(branchUri.toString(), legacyText)
             }
             val branch = HistoryBranchMetadata(
                 id = "branch_01",
@@ -178,29 +186,37 @@ class FileSessionStore(
             ?: findOrCreateFile(treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json")
         val activeChild = diskById[activeId] ?: throw IOException("The active history branch file is missing.")
         val activeUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, activeChild.id)
-        val activeText = readText(activeUri.toString())
-        val parsedActiveDocument = runCatching {
-            HistoryMd.parse(activeText, sessionId, "New chat", metadataText, activeId).copy(branchId = activeId)
-        }.getOrNull()
-        val normalizedText = if (parsedActiveDocument != null) {
-            HistoryMeta.renderForBranch(
-                metadataText.orEmpty(),
-                parsedActiveDocument,
-                activeId,
-                reconciledBranches,
-                normalized.nextBranchNumber
-            )
-        } else {
-            // Corrupted or truncated Markdown must not make its previous message inventory
-            // disappear from the sidecar; Repair needs that inventory to distinguish damage
-            // from an intentionally empty branch.
-            HistoryMeta.reconcileBranches(
-                metadataText.orEmpty(), sessionId, activeId, reconciledBranches, normalized.nextBranchNumber
-            )
+        // Re-read every branch, not just the selected one. This makes edits to any
+        // history_branch_NN.md visible in the sidecar as soon as the app resumes.
+        var synchronizedMetadata = metadataText.orEmpty()
+        for (child in branchChildren.sortedBy {
+            branchIdFromFile(it.name).removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE
+        }) {
+            val branchId = branchIdFromFile(child.name)
+            val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id)
+            val parsed = runCatching {
+                HistoryMd.parse(
+                    readText(uri.toString()), sessionId, "New chat", synchronizedMetadata, branchId
+                ).copy(branchId = branchId)
+            }.getOrNull()
+            synchronizedMetadata = if (parsed != null) {
+                HistoryMeta.syncBranchDocument(
+                    synchronizedMetadata, sessionId, parsed, branchId,
+                    reconciledBranches, normalized.nextBranchNumber
+                )
+            } else {
+                // Keep prior branch membership when the Markdown is malformed; Repair must
+                // distinguish a damaged file from a deliberately emptied branch.
+                HistoryMeta.reconcileBranches(
+                    synchronizedMetadata, sessionId, activeId, reconciledBranches, normalized.nextBranchNumber
+                )
+            }
         }
-        if (metadataText != normalizedText || currentMeta.version != 2 ||
-            currentMeta.activeBranchId != activeId || currentMeta.branches != reconciledBranches) {
-            writeText(metaUri.toString(), normalizedText)
+        val finalMeta = HistoryMeta.parse(synchronizedMetadata, sessionId)
+        if (metadataText != synchronizedMetadata || currentMeta.version != 2 ||
+            currentMeta.activeBranchId != activeId || currentMeta.branches != reconciledBranches ||
+            finalMeta.activeBranchId != activeId) {
+            writeText(metaUri.toString(), synchronizedMetadata)
         }
 
         SessionFiles(
@@ -246,8 +262,9 @@ class FileSessionStore(
     override suspend fun syncHistoryMetadata(files: SessionFiles, document: HistoryDocument) {
         val metadataUri = files.historyMetaUri ?: return
         val previousText = readText(metadataUri)
-        val rendered = HistoryMeta.renderForBranch(
+        val rendered = HistoryMeta.syncBranchDocument(
             previousText,
+            files.sessionId,
             document.copy(branchId = files.activeBranchId),
             files.activeBranchId,
             files.branches,

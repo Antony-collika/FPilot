@@ -338,6 +338,7 @@ fun AppRoot(vm: ChatViewModel) {
                         onRepairHistory = { vm.repairActiveHistory() },
                         onRepairMemory = { vm.repairActiveMemory() },
                         onCreateHistoryTemplate = { vm.createActiveHistoryTemplate() },
+                        onSwitchBranch = { branchId -> vm.switchActiveBranch(branchId) },
                         onPickModel = {
                             if (providers.isEmpty()) {
                                 editingProvider = null
@@ -443,7 +444,8 @@ fun AppRoot(vm: ChatViewModel) {
                     onDeleteMessage = { id -> vm.deleteMessage(id) },
                     onDeleteTurn = { id -> vm.deleteTurn(id) },
                     onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
-                    onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) }
+                    onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) },
+                    onSwitchBranch = { branchId -> vm.switchActiveBranch(branchId) }
                 )
             }
             Screen.Providers -> {

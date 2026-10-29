@@ -99,7 +99,8 @@ fun ChatScreen(
     hasFileSession: Boolean = false,
     onRepairHistory: () -> Unit = {},
     onRepairMemory: () -> Unit = {},
-    onCreateHistoryTemplate: () -> Unit = {}
+    onCreateHistoryTemplate: () -> Unit = {},
+    onSwitchBranch: (String) -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
@@ -155,6 +156,15 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 items(messages, key = { it.id }) { msg ->
+                    Column {
+                        if (msg.role == "assistant" && conversation != null) {
+                            HistoryBranchSelector(
+                                branches = conversation.historyBranches,
+                                activeBranchId = conversation.activeBranchId,
+                                enabled = !isStreaming,
+                                onSelect = onSwitchBranch
+                            )
+                        }
                     MessageItem(
                         message = msg,
                         senderLabel = if (msg.role == "user") "You"
@@ -182,6 +192,7 @@ fun ChatScreen(
                         onDelete = { onDeleteMessage(msg.id) },
                         onRegenerateFrom = { onRegenerateFrom(msg.id) }
                     )
+                    }
                 }
             }
         }

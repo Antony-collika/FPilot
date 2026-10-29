@@ -155,6 +155,55 @@ object HistoryMeta {
         )
     }
 
+    /** Reconcile one Markdown file without changing which branch is active in the session. */
+    fun syncBranchDocument(
+        previousText: String,
+        expectedSessionId: String,
+        document: HistoryDocument,
+        branchId: String,
+        branches: List<HistoryBranchMetadata>,
+        nextBranchNumber: Int
+    ): String {
+        val previous = parse(previousText, expectedSessionId)
+        require(previous.branches.any { it.id == branchId } || branches.any { it.id == branchId }) {
+            "Unknown history branch '$branchId'."
+        }
+        val mergedMessages = linkedMapOf<String, HistoryMessageMetadata>()
+        mergedMessages.putAll(previous.messages)
+        document.messages.forEach { message ->
+            require(message.id.isNotBlank()) { "Message IDs must not be blank." }
+            val old = mergedMessages[message.id]
+            mergedMessages[message.id] = HistoryMessageMetadata(
+                attachments = message.attachments,
+                createdAt = message.createdAt,
+                extraContent = message.extraContent,
+                toolRounds = message.toolRounds,
+                branchId = message.branchId ?: old?.branchId ?: branchId
+            )
+        }
+        val branchMap = linkedMapOf<String, HistoryBranchMetadata>()
+        previous.branches.forEach { branchMap[it.id] = it }
+        branches.forEach { incoming ->
+            val old = branchMap[incoming.id]
+            branchMap[incoming.id] = if (incoming.id == branchId) {
+                incoming.copy(messageIds = document.messages.map { it.id })
+            } else if (incoming.messageIds.isEmpty() && old?.messageIds?.isNotEmpty() == true) {
+                incoming.copy(messageIds = old.messageIds)
+            } else incoming
+        }
+        val maxNumber = branchMap.keys.mapNotNull { it.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1
+        val active = previous.activeBranchId.takeIf { id -> branchMap.containsKey(id) } ?: branchId
+        return json.encodeToString(
+            previous.copy(
+                version = 2,
+                activeBranchId = active,
+                messages = mergedMessages,
+                branches = branchMap.values.sortedBy { it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE },
+                nextBranchNumber = maxOf(nextBranchNumber, maxNumber + 1, 2)
+            )
+        )
+    }
+
     /** Update branch inventory without rewriting per-branch message membership. */
     fun reconcileBranches(
         previousText: String,
