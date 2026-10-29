@@ -289,7 +289,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val conversation = store.snapshot().firstOrNull { it.id == id } ?: return true
         val sessionId = conversation.sessionId ?: return true
         val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return true
-        try {
+        return try {
             val files = fileSessionStore.ensureSession(storageUri, sessionId)
             val raw = fileSessionStore.readText(files.historyUri)
             val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
@@ -946,9 +946,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteMessage(messageId: String) {
         if (isBusy()) return
         val convId = _activeId.value ?: return
-        persistHistoryEdit(convId) { conv ->
+        persistHistoryEdit(convId, { conv ->
             conv.copy(messages = conv.messages.filterNot { it.id == messageId })
-        }
+        })
     }
 
     /** Edit a message's text content (no resend). */
@@ -1293,25 +1293,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Deletes a whole turn: the user message and everything up to the next user message. */
     fun deleteTurn(userMessageId: String) {
         if (isBusy()) return
-        changeActiveConversation { conv ->
+        changeActiveConversation({ conv ->
             val start = conv.messages.indexOfFirst { it.id == userMessageId }
             if (start < 0) return@changeActiveConversation conv
             var end = start + 1
             while (end < conv.messages.size && conv.messages[end].role != "user") end++
             conv.copy(messages = conv.messages.filterIndexed { index, _ -> index < start || index >= end })
-        }
+        })
     }
 
     /** Deletes one tool round (the calls and their results together). */
     fun deleteToolRound(assistantMessageId: String, roundIndex: Int) {
         if (isBusy()) return
-        changeActiveConversation { conv ->
+        changeActiveConversation({ conv ->
             conv.copy(messages = conv.messages.map { message ->
                 if (message.id == assistantMessageId && roundIndex in message.toolRounds.indices) {
                     message.copy(toolRounds = message.toolRounds.filterIndexed { index, _ -> index != roundIndex })
                 } else message
             })
-        }
+        })
     }
 
     /** Changes the text of one tool result. Its short note is made again from the new text. */
