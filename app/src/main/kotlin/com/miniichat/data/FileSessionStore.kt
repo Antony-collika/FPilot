@@ -161,7 +161,7 @@ class FileSessionStore(
             if (found.isDirectory) throw IOException("\"$name\" exists but is a folder.")
             return DocumentsContract.buildDocumentUriUsingTree(treeUri, found.id)
         }
-        val uri = DocumentsContract.createDocument(resolver, parent, "text/markdown", name)
+        val uri = DocumentsContract.createDocument(resolver, parent, mimeType, name)
             ?: throw IOException("Could not create the file \"$name\".")
         val output = resolver.openOutputStream(uri, "wt")
             ?: throw IOException("Could not write the file \"$name\".")
