@@ -51,7 +51,7 @@ object HistoryMd {
     fun empty(sessionId: String, title: String = "New chat", createdAt: Long = System.currentTimeMillis()) =
         HistoryDocument(sessionId, title, createdAt, 1, emptyList())
 
-    fun parse(text: String, fallbackSessionId: String, fallbackTitle: String = "New chat"): HistoryDocument {
+    fun parse(text: String, fallbackSessionId: String, fallbackTitle: String = "New chat", metadataText: String? = null): HistoryDocument {
         if (text.isBlank()) return empty(fallbackSessionId, fallbackTitle)
         val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         if (lines.firstOrNull() != "---") {
@@ -112,6 +112,10 @@ object HistoryMd {
         }
         finishBlock()
 
+        if (metadataText != null) {
+            return parseSidecarFormat(session, title, createdAt, declaredNext, blocks, metadataText)
+        }
+
         val turns = linkedMapOf<Int, MutableList<HistoryBlock>>()
         for (block in blocks) turns.getOrPut(block.turn) { mutableListOf() }.add(block)
         val messages = mutableListOf<Message>()
@@ -130,6 +134,63 @@ object HistoryMd {
             messages += parseMessageBlock(assistants.single(), "assistant", rounds)
         }
         return HistoryDocument(session, title, createdAt, maxOf(declaredNext, maxTurn + 1), messages)
+    }
+
+    @Serializable
+    private data class MessageId(val id: String)
+
+    private fun parseSidecarFormat(
+        session: String,
+        title: String,
+        createdAt: Long,
+        declaredNext: Int,
+        blocks: List<HistoryBlock>,
+        metadataText: String
+    ): HistoryDocument {
+        val metadata = try {
+            HistoryMeta.parse(metadataText, session)
+        } catch (error: Exception) {
+            throw HistoryFormatException(1, "history.meta.json", "Invalid sidecar metadata: " + (error.message ?: "unknown error"))
+        }
+        val seenIds = mutableSetOf<String>()
+        val messages = mutableListOf<Message>()
+        var maxTurn = 0
+        for (block in blocks) {
+            if (block.turn <= 0) {
+                throw HistoryFormatException(block.startLine, "## T" + block.turn, "Turn number must be positive.")
+            }
+            if (block.kind != "user" && block.kind != "assistant") {
+                throw HistoryFormatException(block.startLine, "## T" + block.turn, "Tool rounds must be stored in history.meta.json for this format.")
+            }
+            maxTurn = maxOf(maxTurn, block.turn)
+            val idLine = block.lines.firstOrNull().orEmpty()
+            val id = runCatching { json.decodeFromString<MessageId>(idLine).id }.getOrElse {
+                throw HistoryFormatException(block.startLine + 1, idLine, "Expected a JSON message ID line immediately after the heading.")
+            }
+            if (id.isBlank()) throw HistoryFormatException(block.startLine + 1, idLine, "Message ID must not be blank.")
+            if (!seenIds.add(id)) throw HistoryFormatException(block.startLine + 1, idLine, "Duplicate message ID '" + id + "'.")
+            val meta = metadata.messages[id]
+                ?: throw HistoryFormatException(block.startLine + 1, idLine, "Message ID '" + id + "' is missing from history.meta.json.")
+            var bodyLines = block.lines.drop(1)
+            while (bodyLines.lastOrNull().isNullOrEmpty()) bodyLines = bodyLines.dropLast(1)
+            messages += Message(
+                id = id,
+                role = block.kind,
+                content = unescape(bodyLines).joinToString("\n"),
+                attachments = meta.attachments,
+                createdAt = meta.createdAt,
+                extraContent = meta.extraContent,
+                turnNo = if (block.kind == "user") block.turn else null,
+                toolRounds = if (block.kind == "assistant") meta.toolRounds else emptyList()
+            )
+        }
+        return HistoryDocument(
+            sessionId = session,
+            title = title,
+            createdAt = createdAt,
+            nextTurn = maxOf(declaredNext, maxTurn + 1),
+            messages = messages
+        )
     }
 
     private fun parseMessageBlock(block: HistoryBlock, role: String, rounds: List<ToolRound> = emptyList()): Message {
@@ -176,7 +237,7 @@ object HistoryMd {
         return messages.filterNot { it.role == "assistant" && it.content.isEmpty() }
     }
 
-    fun render(document: HistoryDocument): String {
+    fun render(document: HistoryDocument, sidecarFormat: Boolean = false): String {
         require(sessionPattern.matches(document.sessionId)) { "Invalid session ID." }
         val created = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -192,6 +253,25 @@ object HistoryMd {
             out.append("<!-- Repair note: ").append(note.replace("--", "—").replace("-->", "—>")).append(" -->\n")
         }
         if (document.repairNotes.isNotEmpty()) out.append("\n")
+        if (sidecarFormat) {
+            var currentTurn = 1
+            var nextTurn = 1
+            document.messages.forEach { message ->
+                val turn = if (message.role == "user") {
+                    (message.turnNo ?: nextTurn).also {
+                        currentTurn = it
+                        nextTurn = maxOf(nextTurn, it + 1)
+                    }
+                } else {
+                    currentTurn
+                }
+                if (message.role != "user" && message.role != "assistant") return@forEach
+                out.append("## T").append(turn).append(" ").append(message.role).append("\n")
+                out.append(json.encodeToString(MessageId(message.id))).append("\n")
+                out.append(escape(message.content)).append("\n\n")
+            }
+            return out.toString()
+        }
         var index = 0
         var fallbackTurn = 1
         while (index < document.messages.size) {
