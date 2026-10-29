@@ -30,10 +30,15 @@ class DataStoreSessionRepository(context: Context) : SessionRepository {
 data class SessionFiles(
     val sessionId: String,
     val directoryName: String,
+    /** URI of the currently active history_branch_NN.md. */
     val historyUri: String,
     val memoryUri: String,
-    /** Non-null only for sessions created with the ID-linked sidecar format. */
-    val historyMetaUri: String? = null
+    val historyMetaUri: String? = null,
+    val directoryUri: String = "",
+    val storageTreeUri: String = "",
+    val activeBranchId: String = "branch_01",
+    val branches: List<HistoryBranchMetadata> = emptyList(),
+    val nextBranchNumber: Int = 2
 )
 
 interface SessionFilesRepository {
@@ -44,11 +49,14 @@ interface SessionFilesRepository {
     suspend fun repairHistory(uriString: String, sessionId: String, title: String = "New chat"): String
     suspend fun repairMemory(uriString: String): String
     suspend fun createHistoryTemplate(uriString: String, sessionId: String, title: String = "New chat")
+    suspend fun switchHistoryBranch(files: SessionFiles, branchId: String): SessionFiles
+    suspend fun createHistoryBranch(files: SessionFiles, document: HistoryDocument, parentBranchId: String?): SessionFiles
+    suspend fun syncHistoryMetadata(files: SessionFiles, document: HistoryDocument)
 
     suspend fun readHistory(files: SessionFiles, fallbackTitle: String = "New chat"): HistoryDocument {
         val markdown = readText(files.historyUri)
         val metadata = files.historyMetaUri?.let { readText(it) }
-        return HistoryMd.parse(markdown, files.sessionId, fallbackTitle, metadata)
+        return HistoryMd.parse(markdown, files.sessionId, fallbackTitle, metadata, files.activeBranchId)
     }
 
     /** Validate both serialized representations before writing either file. */
@@ -57,27 +65,28 @@ interface SessionFilesRepository {
             writeText(files.historyUri, HistoryMd.render(document))
             return
         }
-        val metadata = HistoryMeta.render(document)
-        HistoryMeta.parse(metadata, document.sessionId)
-        val markdown = HistoryMd.render(document, sidecarFormat = true)
-        HistoryMd.parse(markdown, document.sessionId, document.title, metadata)
-        // SAF has no portable atomic transaction across two documents. First write a
-        // union containing both old and new IDs, then commit Markdown, and only then prune
-        // unused metadata. A process stop between the first two writes remains readable.
         val previousMetadata = readText(files.historyMetaUri)
         val previousMarkdown = readText(files.historyUri)
-        val retainedMetadata = HistoryMeta.renderRetainingPrevious(previousMetadata, document)
+        val branchDocument = document.copy(branchId = files.activeBranchId)
+        val markdown = HistoryMd.render(branchDocument, sidecarFormat = true)
+        val metadata = HistoryMeta.renderForBranch(
+            previousText = previousMetadata,
+            document = branchDocument,
+            activeBranchId = files.activeBranchId,
+            branches = files.branches,
+            nextBranchNumber = files.nextBranchNumber
+        )
+        HistoryMeta.parse(metadata, document.sessionId)
+        HistoryMd.parse(markdown, document.sessionId, document.title, metadata, files.activeBranchId)
+        // Preserve all old IDs in the sidecar until the currently selected Markdown has
+        // committed. The metadata is app-managed; normal editing only requires editing MD.
         try {
-            writeText(files.historyMetaUri, retainedMetadata)
-            writeText(files.historyUri, markdown)
             writeText(files.historyMetaUri, metadata)
+            writeText(files.historyUri, markdown)
         } catch (failure: Exception) {
-            // Restore in an order where the intermediate sidecar accepts either transcript.
-            runCatching { writeText(files.historyMetaUri, retainedMetadata) }
+            runCatching { writeText(files.historyMetaUri, HistoryMeta.renderRetainingPrevious(previousMetadata, branchDocument)) }
                 .exceptionOrNull()?.let { failure.addSuppressed(it) }
             runCatching { writeText(files.historyUri, previousMarkdown) }
-                .exceptionOrNull()?.let { failure.addSuppressed(it) }
-            runCatching { writeText(files.historyMetaUri, previousMetadata) }
                 .exceptionOrNull()?.let { failure.addSuppressed(it) }
             throw failure
         }

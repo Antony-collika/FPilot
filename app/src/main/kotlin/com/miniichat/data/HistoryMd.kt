@@ -23,7 +23,8 @@ data class HistoryDocument(
     val createdAt: Long,
     val nextTurn: Int,
     val messages: List<Message>,
-    val repairNotes: List<String> = emptyList()
+    val repairNotes: List<String> = emptyList(),
+    val branchId: String = "branch_01"
 )
 
 private data class HistoryBlock(
@@ -52,7 +53,13 @@ object HistoryMd {
     fun empty(sessionId: String, title: String = "New chat", createdAt: Long = System.currentTimeMillis()) =
         HistoryDocument(sessionId, title, createdAt, 1, emptyList())
 
-    fun parse(text: String, fallbackSessionId: String, fallbackTitle: String = "New chat", metadataText: String? = null): HistoryDocument {
+    fun parse(
+        text: String,
+        fallbackSessionId: String,
+        fallbackTitle: String = "New chat",
+        metadataText: String? = null,
+        branchId: String? = null
+    ): HistoryDocument {
         if (text.isBlank()) {
             if (metadataText != null) {
                 val metadata = try {
@@ -61,10 +68,11 @@ object HistoryMd {
                     throw HistoryFormatException(1, "history.meta.json", "Invalid sidecar metadata: " + (error.message ?: "unknown error"))
                 }
                 if (metadata.messages.isNotEmpty()) {
-                    throw HistoryFormatException(1, "", "history.md is empty but history.meta.json still contains message metadata.")
+                    throw HistoryFormatException(1, "", "The active branch Markdown is empty but history.meta.json still contains message metadata.")
                 }
+                return empty(fallbackSessionId, fallbackTitle).copy(branchId = branchId ?: metadata.activeBranchId)
             }
-            return empty(fallbackSessionId, fallbackTitle)
+            return empty(fallbackSessionId, fallbackTitle).copy(branchId = branchId ?: "branch_01")
         }
         val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         if (lines.firstOrNull() != "---") {
@@ -126,7 +134,7 @@ object HistoryMd {
         finishBlock()
 
         if (metadataText != null) {
-            return parseSidecarFormat(session, title, createdAt, declaredNext, blocks, metadataText)
+            return parseSidecarFormat(session, title, createdAt, declaredNext, blocks, metadataText, branchId)
         }
         val messageBlocks = blocks.filter { it.kind == "user" || it.kind == "assistant" }
         val idLineFound = messageBlocks.firstOrNull { block ->
@@ -136,7 +144,13 @@ object HistoryMd {
             runCatching { compactJson.decodeFromString<MessageId>(block.lines.firstOrNull().orEmpty()).id.isNotBlank() }.getOrDefault(false)
         }
         if (idLineFound != null && allBlocksHaveIdLines && blocks.none { it.lines.any { line -> line.trim() == "```json-meta" } }) {
-            throw HistoryFormatException(idLineFound.startLine + 1, idLineFound.lines.firstOrNull().orEmpty(), "This history uses the sidecar format, but history.meta.json is missing.")
+            // The Markdown remains recoverable if the sidecar is deleted. Preserve IDs and
+            // message bodies, rebuild missing metadata with safe defaults, and let the caller
+            // merge cached attachments/tool data back by ID before writing the sidecar.
+            return parseSidecarFormat(
+                session, title, createdAt, declaredNext, blocks,
+                HistoryMeta.empty(session), branchId ?: "branch_01"
+            )
         }
 
         val turns = linkedMapOf<Int, MutableList<HistoryBlock>>()
@@ -156,7 +170,7 @@ object HistoryMd {
             messages += parseMessageBlock(users.single(), "user")
             messages += parseMessageBlock(assistants.single(), "assistant", rounds)
         }
-        return HistoryDocument(session, title, createdAt, maxOf(declaredNext, maxTurn + 1), messages)
+        return HistoryDocument(session, title, createdAt, maxOf(declaredNext, maxTurn + 1), messages, branchId = branchId ?: "branch_01")
     }
 
     @Serializable
@@ -168,7 +182,8 @@ object HistoryMd {
         createdAt: Long,
         declaredNext: Int,
         blocks: List<HistoryBlock>,
-        metadataText: String
+        metadataText: String,
+        branchId: String? = null
     ): HistoryDocument {
         val metadata = try {
             HistoryMeta.parse(metadataText, session)
@@ -192,8 +207,10 @@ object HistoryMd {
             }
             if (id.isBlank()) throw HistoryFormatException(block.startLine + 1, idLine, "Message ID must not be blank.")
             if (!seenIds.add(id)) throw HistoryFormatException(block.startLine + 1, idLine, "Duplicate message ID '" + id + "'.")
-            val meta = metadata.messages[id]
-                ?: throw HistoryFormatException(block.startLine + 1, idLine, "Message ID '" + id + "' is missing from history.meta.json.")
+            val meta = metadata.messages[id] ?: HistoryMessageMetadata(
+                createdAt = System.currentTimeMillis(),
+                branchId = branchId ?: metadata.activeBranchId
+            )
             var bodyLines = block.lines.drop(1)
             while (bodyLines.lastOrNull().isNullOrEmpty()) bodyLines = bodyLines.dropLast(1)
             messages += Message(
@@ -204,7 +221,8 @@ object HistoryMd {
                 createdAt = meta.createdAt,
                 extraContent = meta.extraContent,
                 turnNo = if (block.kind == "user") block.turn else null,
-                toolRounds = if (block.kind == "assistant") meta.toolRounds else emptyList()
+                toolRounds = if (block.kind == "assistant") meta.toolRounds else emptyList(),
+                branchId = meta.branchId ?: branchId ?: metadata.activeBranchId
             )
         }
         return HistoryDocument(
@@ -212,7 +230,8 @@ object HistoryMd {
             title = title,
             createdAt = createdAt,
             nextTurn = maxOf(declaredNext, maxTurn + 1),
-            messages = messages
+            messages = messages,
+            branchId = branchId ?: metadata.activeBranchId
         )
     }
 

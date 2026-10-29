@@ -64,7 +64,9 @@ data class Message(
     /** Turn number (1, 2, 3...). Only set on user messages. Never reused. */
     @SerialName("turn_no") val turnNo: Int? = null,
     /** Tool rounds of the turn. Only set on the final assistant message of a turn. */
-    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList()
+    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList(),
+    /** Branch where this message was originally created; inherited messages keep their origin. */
+    @SerialName("branch_id") val branchId: String? = null
 )
 
 @Serializable
@@ -79,5 +81,9 @@ data class Conversation(
     /** Random eight-hex-character identifier used for a file-backed session folder. */
     @SerialName("session_id") val sessionId: String? = null,
     /** Persisted Storage tree URI; changing Settings does not redirect an existing session. */
-    @SerialName("session_storage_uri") val sessionStorageUri: String? = null
+    @SerialName("session_storage_uri") val sessionStorageUri: String? = null,
+    /** Active branch is mirrored from history.meta.json for UI state. */
+    @SerialName("active_branch_id") val activeBranchId: String? = null,
+    /** Available file-backed branches, mirrored from history.meta.json. */
+    @SerialName("history_branches") val historyBranches: List<HistoryBranchMetadata> = emptyList()
 )

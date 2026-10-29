@@ -23,45 +23,197 @@ class FileSessionStore(
         val isDirectory: Boolean get() = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
     }
 
-    override suspend fun ensureSession(storageTreeUri: String, sessionId: String, useSidecarForNewSession: Boolean): SessionFiles =
-        withContext(Dispatchers.IO) {
-            require(storageTreeUri.isNotBlank()) { "Choose a Storage folder first." }
-            require(SESSION_ID.matches(sessionId)) { "The session ID is invalid." }
+    private val BRANCH_FILE = Regex("^history_branch_([0-9]{2,})\\.md$")
 
-            val treeUri = Uri.parse(storageTreeUri)
-            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-                ?: throw IOException("Could not open the selected Storage folder.")
-            val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
-            val sessions = findOrCreateDirectory(treeUri, root, "sessions")
-            val existing = listChildren(treeUri, sessions)
-                .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
-            val isNewSessionFolder = existing == null
-            val folder = if (existing != null) {
-                DocumentsContract.buildDocumentUriUsingTree(treeUri, existing.id)
-            } else {
-                val date = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
-                findOrCreateDirectory(treeUri, sessions, "${date}_$sessionId")
-            }
-            val folderName = queryDisplayName(folder) ?: "session_$sessionId"
+    private fun branchIdFromFile(fileName: String): String {
+        val number = BRANCH_FILE.matchEntire(fileName)?.groupValues?.get(1)?.toIntOrNull()
+            ?: throw IOException("Invalid history branch file name: $fileName")
+        return "branch_" + number.toString().padStart(2, '0')
+    }
 
-            val history = findOrCreateFile(treeUri, folder, "history.md", "")
-            val memory = findOrCreateFile(treeUri, folder, "memory.md", MemoryDoc.template())
-            // A sidecar is the format marker. Never add one to an existing session folder:
-            // sessions created before this refactor remain on their original on-disk format.
-            val metadata = if (isNewSessionFolder && useSidecarForNewSession) {
-                findOrCreateFile(treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json")
+    override suspend fun ensureSession(
+        storageTreeUri: String,
+        sessionId: String,
+        useSidecarForNewSession: Boolean
+    ): SessionFiles = withContext(Dispatchers.IO) {
+        require(storageTreeUri.isNotBlank()) { "Choose a Storage folder first." }
+        require(SESSION_ID.matches(sessionId)) { "The session ID is invalid." }
+
+        val treeUri = Uri.parse(storageTreeUri)
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+            ?: throw IOException("Could not open the selected Storage folder.")
+        val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
+        val sessions = findOrCreateDirectory(treeUri, root, "sessions")
+        val existing = listChildren(treeUri, sessions)
+            .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
+        val folder = if (existing != null) {
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, existing.id)
+        } else {
+            val date = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
+            findOrCreateDirectory(treeUri, sessions, "${date}_$sessionId")
+        }
+        val folderName = queryDisplayName(folder) ?: "session_$sessionId"
+        val memory = findOrCreateFile(treeUri, folder, "memory.md", MemoryDoc.template())
+        var children = listChildren(treeUri, folder)
+        var metaChild = children.firstOrNull { !it.isDirectory && it.name == "history.meta.json" }
+        var metadataText = metaChild?.let {
+            readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
+        }
+        var metadata = metadataText?.let { runCatching { HistoryMeta.parse(it, sessionId) }.getOrNull() }
+
+        // Migrate the former history.md format into the first named branch. Keep the source
+        // file as a recoverable backup; all future reads and writes use history_branch_NN.md.
+        var branchChildren = children.filter { !it.isDirectory && BRANCH_FILE.matches(it.name) }
+        if (branchChildren.isEmpty()) {
+            val legacy = children.firstOrNull { !it.isDirectory && it.name == "history.md" }
+            val branchUri = findOrCreateFile(treeUri, folder, "history_branch_01.md", "")
+            val legacyText = legacy?.let {
+                readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
+            }.orEmpty()
+            val recovered = if (legacyText.isBlank()) {
+                HistoryMd.empty(sessionId, "New chat")
             } else {
-                listChildren(treeUri, folder).firstOrNull { !it.isDirectory && it.name == "history.meta.json" }
-                    ?.let { DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id) }
+                runCatching {
+                    HistoryMd.parse(legacyText, sessionId, "New chat", metadataText, "branch_01")
+                }.getOrElse {
+                    // Do not overwrite malformed source text. Repair can salvage valid blocks later.
+                    HistoryMd.empty(sessionId, "New chat")
+                }
+            }.copy(branchId = "branch_01")
+            if (legacyText.isBlank() || recovered.messages.isNotEmpty()) {
+                writeText(branchUri.toString(), HistoryMd.render(recovered, sidecarFormat = true))
             }
-            SessionFiles(
-                sessionId = sessionId,
-                directoryName = folderName,
-                historyUri = history.toString(),
-                memoryUri = memory.toString(),
-                historyMetaUri = metadata?.toString()
+            val branch = HistoryBranchMetadata(
+                id = "branch_01",
+                file = "history_branch_01.md",
+                parentBranchId = null,
+                createdAt = recovered.createdAt
+            )
+            if (metaChild == null) {
+                metaChild = findOrCreateFile(
+                    treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json"
+                )
+            }
+            val builtMeta = runCatching {
+                HistoryMeta.renderForBranch(
+                    metadataText.orEmpty(), recovered, "branch_01", listOf(branch), 2
+                )
+            }.getOrElse {
+                HistoryMeta.renderForBranch("", recovered, "branch_01", listOf(branch), 2)
+            }
+            val metaUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, metaChild!!.id)
+            writeText(metaUri.toString(), builtMeta)
+            metadataText = builtMeta
+            metadata = HistoryMeta.parse(builtMeta, sessionId)
+            children = listChildren(treeUri, folder)
+            branchChildren = children.filter { !it.isDirectory && BRANCH_FILE.matches(it.name) }
+        } else if (metadata == null) {
+            // If JSON was removed or corrupted, recover branch identities and message IDs from
+            // Markdown. Cache-backed fields are merged by ChatViewModel before the next write.
+            if (metaChild != null && !metadataText.isNullOrBlank()) {
+                runCatching {
+                    backupFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, metaChild!!.id).toString())
+                }
+            }
+            val ordered = branchChildren.sortedBy {
+                BRANCH_FILE.matchEntire(it.name)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
+            }
+            val activeChild = ordered.lastOrNull() ?: throw IOException("No history branch Markdown file was found.")
+            val activeUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, activeChild.id)
+            val activeId = branchIdFromFile(activeChild.name)
+            val recovered = runCatching {
+                HistoryMd.parse(readText(activeUri.toString()), sessionId, "New chat", null, activeId)
+            }.getOrElse { HistoryMd.empty(sessionId, "New chat").copy(branchId = activeId) }
+            val branches = ordered.map { child ->
+                val id = branchIdFromFile(child.name)
+                HistoryBranchMetadata(id, child.name, null, System.currentTimeMillis())
+            }
+            val next = (branches.mapNotNull { it.id.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1) + 1
+            val rebuilt = HistoryMeta.renderForBranch("", recovered, activeId, branches, next)
+            if (metaChild == null) {
+                val uri = findOrCreateFile(treeUri, folder, "history.meta.json", rebuilt, "application/json")
+                metaChild = Child(DocumentsContract.getDocumentId(uri), "history.meta.json", "application/json")
+            } else {
+                val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, metaChild!!.id)
+                writeText(uri.toString(), rebuilt)
+            }
+            metadataText = rebuilt
+            metadata = HistoryMeta.parse(rebuilt, sessionId)
+        }
+
+        children = listChildren(treeUri, folder)
+        branchChildren = children.filter { !it.isDirectory && BRANCH_FILE.matches(it.name) }
+        if (branchChildren.isEmpty()) {
+            throw IOException("No history_branch_NN.md files are available.")
+        }
+        val currentMeta = metadata ?: run {
+            val latestText = metaChild?.let {
+                readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
+            } ?: throw IOException("Could not create history.meta.json.")
+            HistoryMeta.parse(latestText, sessionId)
+        }
+        val existingById = currentMeta.branches.associateBy { it.id }
+        val diskById = branchChildren.associateBy { branchIdFromFile(it.name) }
+        val reconciledBranches = diskById.map { (id, child) ->
+            existingById[id]?.copy(file = child.name) ?: HistoryBranchMetadata(
+                id = id,
+                file = child.name,
+                parentBranchId = currentMeta.activeBranchId.takeIf { it != id && it in diskById.keys },
+                createdAt = System.currentTimeMillis()
+            )
+        }.sortedBy { it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE }
+        val activeId = currentMeta.activeBranchId.takeIf { it in diskById }
+            ?: reconciledBranches.lastOrNull()?.id
+            ?: throw IOException("No valid history branch is available.")
+        val maxBranchNumber = reconciledBranches.mapNotNull {
+            it.id.removePrefix("branch_").toIntOrNull()
+        }.maxOrNull() ?: 1
+        val normalized = currentMeta.copy(
+            version = 2,
+            activeBranchId = activeId,
+            branches = reconciledBranches,
+            nextBranchNumber = maxOf(currentMeta.nextBranchNumber, maxBranchNumber + 1, 2)
+        )
+        val metaUri = metaChild?.let { DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id) }
+            ?: findOrCreateFile(treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json")
+        val activeChild = diskById[activeId] ?: throw IOException("The active history branch file is missing.")
+        val activeUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, activeChild.id)
+        val activeText = readText(activeUri.toString())
+        val normalizedText = runCatching {
+            HistoryMeta.renderForBranch(
+                metadataText.orEmpty(),
+                HistoryMd.parse(activeText, sessionId, "New chat", metadataText, activeId).copy(branchId = activeId),
+                activeId,
+                reconciledBranches,
+                normalized.nextBranchNumber
+            )
+        }.getOrElse {
+            HistoryMeta.renderForBranch(
+                "",
+                HistoryMd.empty(sessionId, "New chat").copy(branchId = activeId),
+                activeId,
+                reconciledBranches,
+                normalized.nextBranchNumber
             )
         }
+        if (metadataText != normalizedText || currentMeta.version != 2 ||
+            currentMeta.activeBranchId != activeId || currentMeta.branches != reconciledBranches) {
+            writeText(metaUri.toString(), normalizedText)
+        }
+
+        SessionFiles(
+            sessionId = sessionId,
+            directoryName = folderName,
+            historyUri = activeUri.toString(),
+            memoryUri = memory.toString(),
+            historyMetaUri = metaUri.toString(),
+            directoryUri = folder.toString(),
+            storageTreeUri = storageTreeUri,
+            activeBranchId = activeId,
+            branches = reconciledBranches,
+            nextBranchNumber = normalized.nextBranchNumber
+        )
+    }
 
     /** Read a session Markdown file using the persisted Storage Access Framework URI. */
     override suspend fun readText(uriString: String): String = withContext(Dispatchers.IO) {
@@ -77,6 +229,106 @@ class FileSessionStore(
             ?: throw IOException("Could not write the session file.")
         output.bufferedWriter(Charsets.UTF_8).use { it.write(text) }
     }
+    override suspend fun readHistory(files: SessionFiles, fallbackTitle: String): HistoryDocument {
+        val markdown = readText(files.historyUri)
+        val metadataText = files.historyMetaUri?.let { readText(it) }
+        val document = HistoryMd.parse(
+            markdown, files.sessionId, fallbackTitle, metadataText, files.activeBranchId
+        ).copy(branchId = files.activeBranchId)
+        // Any new message IDs written directly in Markdown are adopted into the sidecar.
+        // Body edits never require touching JSON or manually reproducing metadata.
+        syncHistoryMetadata(files, document)
+        return document
+    }
+
+    override suspend fun syncHistoryMetadata(files: SessionFiles, document: HistoryDocument) {
+        val metadataUri = files.historyMetaUri ?: return
+        val previousText = readText(metadataUri)
+        val rendered = HistoryMeta.renderForBranch(
+            previousText,
+            document.copy(branchId = files.activeBranchId),
+            files.activeBranchId,
+            files.branches,
+            files.nextBranchNumber
+        )
+        HistoryMeta.parse(rendered, files.sessionId)
+        if (rendered != previousText) writeText(metadataUri, rendered)
+    }
+
+    override suspend fun switchHistoryBranch(files: SessionFiles, branchId: String): SessionFiles {
+        val metadataUri = files.historyMetaUri ?: throw IOException("This session has no branch metadata.")
+        val metadataText = readText(metadataUri)
+        val metadata = HistoryMeta.parse(metadataText, files.sessionId)
+        val branch = metadata.branches.firstOrNull { it.id == branchId }
+            ?: throw IOException("The requested history branch does not exist.")
+        val treeUri = Uri.parse(files.storageTreeUri)
+        val folder = Uri.parse(files.directoryUri)
+        val child = listChildren(treeUri, folder).firstOrNull { !it.isDirectory && it.name == branch.file }
+            ?: throw IOException("The Markdown file for $branchId is missing.")
+        val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id)
+        val updated = HistoryMeta.setActiveBranch(metadataText, files.sessionId, branchId)
+        writeText(metadataUri, updated)
+        return files.copy(
+            historyUri = uri.toString(),
+            activeBranchId = branchId,
+            branches = metadata.branches,
+            nextBranchNumber = metadata.nextBranchNumber
+        )
+    }
+
+    override suspend fun createHistoryBranch(
+        files: SessionFiles,
+        document: HistoryDocument,
+        parentBranchId: String?
+    ): SessionFiles {
+        val metadataUri = files.historyMetaUri ?: throw IOException("This session has no branch metadata.")
+        val metadataText = readText(metadataUri)
+        val metadata = HistoryMeta.parse(metadataText, files.sessionId)
+        val treeUri = Uri.parse(files.storageTreeUri)
+        val folder = Uri.parse(files.directoryUri)
+        val children = listChildren(treeUri, folder)
+        var number = metadata.nextBranchNumber
+        var branchId: String
+        var fileName: String
+        do {
+            branchId = "branch_" + number.toString().padStart(2, '0')
+            fileName = "history_${branchId}.md"
+            number++
+        } while (children.any { !it.isDirectory && it.name == fileName })
+        val branch = HistoryBranchMetadata(
+            id = branchId,
+            file = fileName,
+            parentBranchId = parentBranchId?.takeIf { it in metadata.branches.map(HistoryBranchMetadata::id) },
+            createdAt = System.currentTimeMillis()
+        )
+        val branches = (metadata.branches + branch).sortedBy {
+            it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE
+        }
+        val nextNumber = number
+        val branchDocument = document.copy(branchId = branchId)
+        val markdown = HistoryMd.render(branchDocument, sidecarFormat = true)
+        val updatedMetadata = HistoryMeta.renderForBranch(
+            metadataText, branchDocument, branchId, branches, nextNumber
+        )
+        HistoryMd.parse(markdown, files.sessionId, branchDocument.title, updatedMetadata, branchId)
+        val branchUri = DocumentsContract.createDocument(resolver, folder, "text/markdown", fileName)
+            ?: throw IOException("Could not create $fileName.")
+        try {
+            writeText(branchUri.toString(), markdown)
+            writeText(metadataUri, updatedMetadata)
+        } catch (failure: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, branchUri) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
+            throw failure
+        }
+        return files.copy(
+            historyUri = branchUri.toString(),
+            activeBranchId = branchId,
+            branches = branches,
+            nextBranchNumber = nextNumber
+        )
+    }
+
 
     /** Create a sibling backup before any repair operation. */
     override suspend fun backupFile(uriString: String): String = withContext(Dispatchers.IO) {
