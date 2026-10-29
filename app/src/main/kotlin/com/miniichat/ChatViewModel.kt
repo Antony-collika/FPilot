@@ -292,13 +292,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             val files = fileSessionStore.ensureSession(storageUri, sessionId)
             val raw = fileSessionStore.readText(files.historyUri)
+            // Validate the sidecar even when history.md is blank, so a truncated Markdown
+            // file cannot cause valid sidecar-backed messages to be replaced from cache.
+            val parsedDocument = fileSessionStore.readHistory(files, conversation.title)
             val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
                 HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
                     nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                     messages = HistoryMd.completedMessages(conversation.messages)
                 ).also { fileSessionStore.writeHistory(files, it) }
             } else {
-                fileSessionStore.readHistory(files, conversation.title)
+                parsedDocument
             }
             store.upsert(conversation.copy(
                 title = document.title,
@@ -332,13 +335,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val files = fileSessionStore.ensureSession(storageUri, sessionId)
                     val raw = fileSessionStore.readText(files.historyUri)
+                    val parsedLatestDocument = fileSessionStore.readHistory(files, current.title)
                     val latestDocument = if (raw.isBlank() && current.messages.isNotEmpty()) {
                         HistoryMd.empty(sessionId, current.title, current.createdAt).copy(
                             nextTurn = maxOf(current.nextTurnNo, (current.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                             messages = HistoryMd.completedMessages(current.messages)
                         )
                     } else {
-                        fileSessionStore.readHistory(files, current.title)
+                        parsedLatestDocument
                     }
                     val latest = current.copy(
                         title = latestDocument.title,
