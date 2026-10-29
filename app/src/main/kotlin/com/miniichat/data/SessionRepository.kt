@@ -37,7 +37,7 @@ data class SessionFiles(
 )
 
 interface SessionFilesRepository {
-    suspend fun ensureSession(storageTreeUri: String, sessionId: String): SessionFiles
+    suspend fun ensureSession(storageTreeUri: String, sessionId: String, useSidecarForNewSession: Boolean = false): SessionFiles
     suspend fun readText(uriString: String): String
     suspend fun writeText(uriString: String, text: String)
     suspend fun backupFile(uriString: String): String
