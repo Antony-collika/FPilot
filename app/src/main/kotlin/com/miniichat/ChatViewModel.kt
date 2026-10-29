@@ -296,9 +296,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
                     nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                     messages = HistoryMd.completedMessages(conversation.messages)
-                ).also { fileSessionStore.writeText(files.historyUri, HistoryMd.render(it)) }
+                ).also { fileSessionStore.writeHistory(files, it) }
             } else {
-                HistoryMd.parse(raw, sessionId, conversation.title)
+                fileSessionStore.readHistory(files, conversation.title)
             }
             store.upsert(conversation.copy(
                 title = document.title,
@@ -338,7 +338,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             messages = HistoryMd.completedMessages(current.messages)
                         )
                     } else {
-                        HistoryMd.parse(raw, sessionId, current.title)
+                        fileSessionStore.readHistory(files, current.title)
                     }
                     val latest = current.copy(
                         title = latestDocument.title,
@@ -352,8 +352,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         nextTurn = maxOf(updated.nextTurnNo, (updated.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                         messages = HistoryMd.completedMessages(updated.messages)
                     )
-                    fileSessionStore.writeText(files.historyUri, HistoryMd.render(updatedDocument))
-                    val verified = HistoryMd.parse(fileSessionStore.readText(files.historyUri), sessionId, updated.title)
+                    fileSessionStore.writeHistory(files, updatedDocument)
+                    val verified = fileSessionStore.readHistory(files, updated.title)
                     store.upsert(updated.copy(
                         title = verified.title,
                         messages = verified.messages,
@@ -392,10 +392,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         messages = HistoryMd.completedMessages(conversation.messages)
                     )
                 } else {
-                    HistoryMd.repair(raw, sessionId, conversation.title)
+                    HistoryMd.repair(
+                        raw, sessionId, conversation.title,
+                        files.historyMetaUri?.let { fileSessionStore.readText(it) }
+                    )
                 }
-                fileSessionStore.writeText(files.historyUri, HistoryMd.render(repairedDocument))
-                val repaired = HistoryMd.parse(fileSessionStore.readText(files.historyUri), sessionId, conversation.title)
+                fileSessionStore.writeHistory(files, repairedDocument)
+                val repaired = fileSessionStore.readHistory(files, conversation.title)
                 store.upsert(conversation.copy(
                     title = repaired.title,
                     messages = repaired.messages,
@@ -456,7 +459,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     _error.value = "history.md is not empty. Use Repair history instead of replacing existing content."
                     return@launch
                 }
-                fileSessionStore.createHistoryTemplate(files.historyUri, sessionId, conversation.title)
+                fileSessionStore.writeHistory(files, HistoryMd.empty(sessionId, conversation.title))
                 _toast.value = "A valid history.md template was created."
             } catch (e: Exception) {
                 _error.value = "Could not create history.md template: " + (e.message ?: "unknown error")
@@ -635,7 +638,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (sessionFiles != null && sessionId != null) {
                 try {
                     val rawHistory = fileSessionStore.readText(sessionFiles.historyUri)
-                    historyDocument = HistoryMd.parse(rawHistory, sessionId, existing?.title ?: baseTitle)
+                    historyDocument = fileSessionStore.readHistory(sessionFiles, existing?.title ?: baseTitle)
                     // Build B created empty history.md files before transcript persistence existed.
                     // Seed only a truly empty file from that same session's existing DataStore cache.
                     if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty()) {
@@ -645,7 +648,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             nextTurn = maxOf(existing.nextTurnNo, (existing.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                             messages = HistoryMd.completedMessages(existing.messages)
                         )
-                        fileSessionStore.writeText(sessionFiles.historyUri, HistoryMd.render(historyDocument!!))
+                        fileSessionStore.writeHistory(sessionFiles, historyDocument!!)
                     }
                 } catch (e: HistoryFormatException) {
                     _error.value = "History file has a problem: " + e.message + " Repair history.md before sending."
@@ -848,7 +851,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             if (turnSucceeded) {
                                 // Re-read immediately before writing so edits made during the request survive.
                                 val latestText = fileSessionStore.readText(sessionFiles.historyUri)
-                                val latest = HistoryMd.parse(latestText, sessionId!!, baseTitle)
+                                val latest = fileSessionStore.readHistory(sessionFiles, baseTitle)
                                 val persistedTurn = maxOf(turnNo, latest.nextTurn)
                                 val persistedUser = userMsg.copy(turnNo = persistedTurn)
                                 val finalAssistant = Message(
@@ -865,7 +868,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     nextTurn = persistedTurn + 1,
                                     messages = combined
                                 )
-                                fileSessionStore.writeText(sessionFiles.historyUri, HistoryMd.render(document))
+                                fileSessionStore.writeHistory(sessionFiles, document)
                                 val persistedConversation = baseConversation.copy(
                                     title = document.title,
                                     messages = combined,
