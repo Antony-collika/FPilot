@@ -67,10 +67,12 @@ object HistoryMd {
                 } catch (error: Exception) {
                     throw HistoryFormatException(1, "history.meta.json", "Invalid sidecar metadata: " + (error.message ?: "unknown error"))
                 }
-                if (metadata.messages.isNotEmpty()) {
-                    throw HistoryFormatException(1, "", "The active branch Markdown is empty but history.meta.json still contains message metadata.")
+                val selectedBranchId = branchId ?: metadata.activeBranchId
+                val selectedBranch = metadata.branches.firstOrNull { it.id == selectedBranchId }
+                if (selectedBranch?.messageIds?.isNotEmpty() == true) {
+                    throw HistoryFormatException(1, "", "The active branch Markdown is empty but metadata says this branch still contains messages.")
                 }
-                return empty(fallbackSessionId, fallbackTitle).copy(branchId = branchId ?: metadata.activeBranchId)
+                return empty(fallbackSessionId, fallbackTitle).copy(branchId = selectedBranchId)
             }
             return empty(fallbackSessionId, fallbackTitle).copy(branchId = branchId ?: "branch_01")
         }

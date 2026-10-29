@@ -12,7 +12,8 @@ data class HistoryBranchMetadata(
     val id: String,
     val file: String,
     val parentBranchId: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val messageIds: List<String> = emptyList()
 )
 
 @Serializable
@@ -124,12 +125,17 @@ object HistoryMeta {
         val branchMap = linkedMapOf<String, HistoryBranchMetadata>()
         previous.branches.forEach { branchMap[it.id] = it }
         branches.forEach { branchMap[it.id] = it }
+        val activeBranch = branchMap[activeBranchId]
+        if (activeBranch != null) {
+            branchMap[activeBranchId] = activeBranch.copy(messageIds = document.messages.map { it.id })
+        }
         if (activeBranchId !in branchMap) {
             branchMap[activeBranchId] = HistoryBranchMetadata(
                 id = activeBranchId,
                 file = "history_${activeBranchId}.md",
                 parentBranchId = null,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                messageIds = document.messages.map { it.id }
             )
         }
         val next = maxOf(
