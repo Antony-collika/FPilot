@@ -319,7 +319,17 @@ object HistoryMd {
     }
 
     /** Best-effort repair retaining valid turns; callers must back up the original before writing. */
-    fun repair(text: String, fallbackSessionId: String, fallbackTitle: String = "New chat"): HistoryDocument {
+    fun repair(
+        text: String,
+        fallbackSessionId: String,
+        fallbackTitle: String = "New chat",
+        metadataText: String? = null
+    ): HistoryDocument {
+        if (metadataText != null) {
+            // Never run the legacy salvage routine on sidecar-format data: it would not
+            // understand ID lines and could silently discard IDs or tool metadata.
+            return parse(text, fallbackSessionId, fallbackTitle, metadataText)
+        }
         try { return parse(text, fallbackSessionId, fallbackTitle) } catch (_: Exception) { /* salvage valid turns below */ }
         val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         val valid = mutableListOf<Message>()
