@@ -23,7 +23,7 @@ class FileSessionStore(
         val isDirectory: Boolean get() = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
     }
 
-    override suspend fun ensureSession(storageTreeUri: String, sessionId: String): SessionFiles =
+    override suspend fun ensureSession(storageTreeUri: String, sessionId: String, useSidecarForNewSession: Boolean): SessionFiles =
         withContext(Dispatchers.IO) {
             require(storageTreeUri.isNotBlank()) { "Choose a Storage folder first." }
             require(SESSION_ID.matches(sessionId)) { "The session ID is invalid." }
@@ -48,7 +48,7 @@ class FileSessionStore(
             val memory = findOrCreateFile(treeUri, folder, "memory.md", MemoryDoc.template())
             // A sidecar is the format marker. Never add one to an existing session folder:
             // sessions created before this refactor remain on their original on-disk format.
-            val metadata = if (isNewSessionFolder) {
+            val metadata = if (isNewSessionFolder && useSidecarForNewSession) {
                 findOrCreateFile(treeUri, folder, "history.meta.json", HistoryMeta.empty(sessionId), "application/json")
             } else {
                 listChildren(treeUri, folder).firstOrNull { !it.isDirectory && it.name == "history.meta.json" }
