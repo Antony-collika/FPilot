@@ -285,10 +285,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Must be called under historySyncMutex. A blank legacy session file is seeded once. */
-    private suspend fun syncHistoryFromFileLocked(id: String) {
-        val conversation = store.snapshot().firstOrNull { it.id == id } ?: return
-        val sessionId = conversation.sessionId ?: return
-        val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return
+    private suspend fun syncHistoryFromFileLocked(id: String): Boolean {
+        val conversation = store.snapshot().firstOrNull { it.id == id } ?: return true
+        val sessionId = conversation.sessionId ?: return true
+        val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return true
         try {
             val files = fileSessionStore.ensureSession(storageUri, sessionId)
             val raw = fileSessionStore.readText(files.historyUri)
@@ -306,8 +306,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 nextTurnNo = document.nextTurn,
                 createdAt = document.createdAt
             ))
+            true
         } catch (e: Exception) {
             _error.value = "Could not load session history: " + (e.message ?: "unknown error")
+            false
         }
     }
 
@@ -1176,7 +1178,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun previewRequest(): String {
         val activeId = _activeId.value
         if (activeId != null && !_isStreaming.value) {
-            historySyncMutex.withLock { syncHistoryFromFileLocked(activeId) }
+            val synchronized = historySyncMutex.withLock { syncHistoryFromFileLocked(activeId) }
+            if (!synchronized) {
+                return "The request cannot be built yet:\nSession history could not be synchronized. Check history.md and retry."
+            }
         }
         val current = settings.value
         val storedConversation = store.snapshot().firstOrNull { it.id == activeId }
