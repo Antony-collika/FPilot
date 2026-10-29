@@ -1282,9 +1282,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return false
     }
 
-    private fun changeActiveConversation(transform: (Conversation) -> Conversation) {
-        val convId = _activeId.value ?: return
-        persistHistoryEdit(convId, transform)
+    private fun changeActiveConversation(
+        transform: (Conversation) -> Conversation,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        val convId = _activeId.value ?: run { onComplete(false); return }
+        persistHistoryEdit(convId, transform, onComplete)
     }
 
     /** Deletes a whole turn: the user message and everything up to the next user message. */
@@ -1312,9 +1315,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Changes the text of one tool result. Its short note is made again from the new text. */
-    fun editToolResult(assistantMessageId: String, roundIndex: Int, resultIndex: Int, newText: String) {
-        if (isBusy()) return
-        changeActiveConversation { conv ->
+    fun editToolResult(
+        assistantMessageId: String,
+        roundIndex: Int,
+        resultIndex: Int,
+        newText: String,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        if (isBusy()) { onComplete(false); return }
+        changeActiveConversation({ conv ->
             val position = conv.messages.indexOfFirst { it.id == assistantMessageId }
             if (position < 0) return@changeActiveConversation conv
             val turnNo = conv.messages.take(position).lastOrNull { it.role == "user" }?.turnNo
@@ -1330,7 +1339,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val newRounds = message.toolRounds.mapIndexed { i, r -> if (i == roundIndex) r.copy(results = newResults) else r }
                 message.copy(toolRounds = newRounds)
             })
-        }
+        }, onComplete)
     }
 
     /** The cards in use: the saved ones, or the ones built from the old Settings. */
