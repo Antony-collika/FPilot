@@ -36,7 +36,7 @@ import com.miniichat.data.Message
 
 private class TurnGroup(val user: Message?, val others: List<Message>)
 
-private class EditRequest(val title: String, val initial: String, val onSave: (String) -> Unit)
+private class EditRequest(val title: String, val initial: String, val onSave: (String, (Boolean) -> Unit) -> Unit)
 
 private class ConfirmRequest(val title: String, val text: String, val onConfirm: () -> Unit)
 
@@ -70,11 +70,11 @@ fun HistoryManagerScreen(
     conversation: Conversation?,
     isBusy: Boolean,
     onBack: () -> Unit,
-    onEditMessage: (String, String) -> Unit,
+    onEditMessage: (String, String, (Boolean) -> Unit) -> Unit,
     onDeleteMessage: (String) -> Unit,
     onDeleteTurn: (String) -> Unit,
     onDeleteToolRound: (String, Int) -> Unit,
-    onEditToolResult: (String, Int, Int, String) -> Unit
+    onEditToolResult: (String, Int, Int, String, (Boolean) -> Unit) -> Unit
 ) {
     val turns = remember(conversation) { groupTurns(conversation?.messages.orEmpty()) }
     var editing by remember { mutableStateOf<EditRequest?>(null) }
@@ -180,7 +180,7 @@ fun HistoryManagerScreen(
                                         enabled = !isBusy,
                                         onEdit = {
                                             editing = EditRequest("Edit the tool result", result.content) {
-                                                onEditToolResult(message.id, roundIndex, resultIndex, it)
+                                                onEditToolResult(message.id, roundIndex, resultIndex, it, done)
                                             }
                                         },
                                         onDelete = null
@@ -192,7 +192,7 @@ fun HistoryManagerScreen(
                                 text = message.content.ifBlank { "(empty)" },
                                 enabled = !isBusy,
                                 onEdit = {
-                                    editing = EditRequest("Edit the answer", message.content) { onEditMessage(message.id, it) }
+                                    editing = EditRequest("Edit the answer", message.content) { value, done -> onEditMessage(message.id, value, done) }
                                 },
                                 onDelete = {
                                     confirming = ConfirmRequest(
@@ -210,20 +210,32 @@ fun HistoryManagerScreen(
 
     editing?.let { request ->
         var draft by remember(request) { mutableStateOf(request.initial) }
+        var saving by remember(request) { mutableStateOf(false) }
+        var saveFailed by remember(request) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { editing = null },
             title = { Text(request.title) },
             text = {
-                UnderlinedField(
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    UnderlinedField(
                     value = draft,
                     onValueChange = { draft = it },
                     label = "Text",
                     minLines = 3,
                     maxLines = 12
-                )
+                    )
+                    if (saveFailed) Text("Could not save this edit. Your text is still here; check the Storage file and try again.", color = MaterialTheme.colorScheme.error)
+                }
             },
             confirmButton = {
-                TextButton(onClick = { request.onSave(draft); editing = null }) { Text("Save") }
+                TextButton(enabled = !saving, onClick = {
+                    saving = true
+                    saveFailed = false
+                    request.onSave(draft) { success ->
+                        saving = false
+                        if (success) editing = null else saveFailed = true
+                    }
+                }) { Text(if (saving) "Saving…" else "Save") }
             },
             dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }
         )
