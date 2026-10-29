@@ -38,6 +38,16 @@ object HistoryMeta {
         return document
     }
 
+    /** Keep deleted-message entries until the Markdown transcript has committed. */
+    fun renderRetainingPrevious(previousText: String, document: HistoryDocument): String {
+        val previous = parse(previousText, document.sessionId)
+        val current = json.decodeFromString<HistoryMetaDocument>(render(document))
+        val retained = linkedMapOf<String, HistoryMessageMetadata>()
+        retained.putAll(previous.messages)
+        retained.putAll(current.messages)
+        return json.encodeToString(current.copy(messages = retained))
+    }
+
     fun render(document: HistoryDocument): String {
         val messages = linkedMapOf<String, HistoryMessageMetadata>()
         document.messages.forEach { message ->
