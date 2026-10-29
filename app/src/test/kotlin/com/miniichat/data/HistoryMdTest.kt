@@ -203,4 +203,24 @@ broken
         assertTrue(retained.messages.containsKey("a1"))
         assertFalse(committed.messages.containsKey("u1"))
     }
+
+    @Test
+    fun sidecarRepairRetainsValidBlocksWhenAnotherHeadingIsMalformed() {
+        val source = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Repair sidecar",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 2,
+            messages = listOf(
+                Message("u1", "user", "question", createdAt = 1, turnNo = 1),
+                Message("a1", "assistant", "answer", createdAt = 2)
+            )
+        )
+        val markdown = HistoryMd.render(source, sidecarFormat = true)
+            .replace("## T1 assistant", "## T1 asistant")
+        val repaired = HistoryMd.repair(markdown, source.sessionId, source.title, HistoryMeta.render(source))
+
+        assertEquals(listOf("u1"), repaired.messages.map { it.id })
+        assertTrue(repaired.repairNotes.isNotEmpty())
+    }
 }
