@@ -185,11 +185,11 @@ object HistoryMeta {
         previous.branches.forEach { branchMap[it.id] = it }
         branches.forEach { incoming ->
             val old = branchMap[incoming.id]
-            branchMap[incoming.id] = if (incoming.id == branchId) {
-                incoming.copy(messageIds = document.messages.map { it.id })
-            } else if (incoming.messageIds.isEmpty() && old?.messageIds?.isNotEmpty() == true) {
-                incoming.copy(messageIds = old.messageIds)
-            } else incoming
+            branchMap[incoming.id] = when {
+                incoming.id == branchId -> incoming.copy(messageIds = document.messages.map { it.id })
+                old != null -> incoming.copy(messageIds = old.messageIds)
+                else -> incoming
+            }
         }
         val maxNumber = branchMap.keys.mapNotNull { it.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1
         val active = previous.activeBranchId.takeIf { id -> branchMap.containsKey(id) } ?: branchId

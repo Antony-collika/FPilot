@@ -26,6 +26,7 @@ import com.miniichat.data.CardRole
 import com.miniichat.data.MemoryDoc
 import com.miniichat.data.MemoryPatch
 import com.miniichat.data.HistoryDocument
+import com.miniichat.data.HistoryBranchMetadata
 import com.miniichat.data.HistoryFormatException
 import com.miniichat.data.HistoryMd
 import com.miniichat.data.RequestBuildException

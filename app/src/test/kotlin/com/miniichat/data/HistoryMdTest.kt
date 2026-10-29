@@ -220,6 +220,15 @@ broken
         assertEquals("branch_02", after.activeBranchId)
         assertEquals(listOf("u1", "a1"), after.branches.first { it.id == "branch_01" }.messageIds)
         assertEquals(listOf("u1", "a2"), after.branches.first { it.id == "branch_02" }.messageIds)
+
+        // Scanning the active file afterwards must not restore stale branch-01 membership.
+        val resynced = HistoryMeta.syncBranchDocument(
+            synced, source.sessionId, source, "branch_02", after.branches, after.nextBranchNumber
+        )
+        val final = HistoryMeta.parse(resynced, source.sessionId)
+        assertEquals("branch_02", final.activeBranchId)
+        assertEquals(listOf("u1", "a1"), final.branches.first { it.id == "branch_01" }.messageIds)
+        assertEquals(listOf("u1", "a2"), final.branches.first { it.id == "branch_02" }.messageIds)
     }
 
     @Test
