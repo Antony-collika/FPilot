@@ -314,6 +314,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (branch.id == files.activeBranchId) branch.copy(messageIds = messages.map { it.id }) else branch
         }
 
+    private fun cacheBelongsToBranch(conversation: Conversation, files: SessionFiles): Boolean =
+        conversation.activeBranchId == files.activeBranchId ||
+            (conversation.activeBranchId == null && files.activeBranchId == "branch_01")
+
     /** Must be called under historySyncMutex. Markdown is the source of truth on resume. */
     private suspend fun syncHistoryFromFileLocked(id: String): Boolean {
         val conversation = store.snapshot().firstOrNull { it.id == id } ?: return true
@@ -321,9 +325,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return true
         return try {
             val files = fileSessionStore.ensureSession(storageUri, sessionId)
+            val raw = fileSessionStore.readText(files.historyUri)
             val parsedDocument = fileSessionStore.readHistory(files, conversation.title)
-            val document = mergeHistoryMetadataFromCache(parsedDocument, conversation.messages)
-                .copy(branchId = files.activeBranchId)
+            val branchInventory = files.branches.firstOrNull { it.id == files.activeBranchId }?.messageIds.orEmpty()
+            val document = if (
+                raw.isBlank() && branchInventory.isEmpty() && conversation.messages.isNotEmpty() &&
+                cacheBelongsToBranch(conversation, files)
+            ) {
+                HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                    nextTurn = maxOf(
+                        conversation.nextTurnNo,
+                        (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1
+                    ),
+                    messages = HistoryMd.completedMessages(conversation.messages).map {
+                        it.copy(branchId = it.branchId ?: files.activeBranchId)
+                    },
+                    branchId = files.activeBranchId
+                ).also { fileSessionStore.writeHistory(files, it) }
+            } else {
+                mergeHistoryMetadataFromCache(parsedDocument, conversation.messages)
+                    .copy(branchId = files.activeBranchId)
+            }
             fileSessionStore.syncHistoryMetadata(files, document)
             store.upsert(conversation.copy(
                 title = document.title,
@@ -355,8 +377,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 try {
                     val files = fileSessionStore.ensureSession(storageUri, sessionId)
-                    if (files.activeBranchId == branchId) return@withLock
-                    val switched = fileSessionStore.switchHistoryBranch(files, branchId)
+                    if (current.activeBranchId == branchId && files.activeBranchId == branchId) return@withLock
+                    val switched = if (files.activeBranchId == branchId) {
+                        files
+                    } else {
+                        fileSessionStore.switchHistoryBranch(files, branchId)
+                    }
                     val parsed = fileSessionStore.readHistory(switched, current.title)
                     val document = mergeHistoryMetadataFromCache(parsed, current.messages)
                         .copy(branchId = switched.activeBranchId)
@@ -463,6 +489,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
                             nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
                             messages = branchInventory.mapNotNull { cachedById[it] },
+                            branchId = files.activeBranchId
+                        )
+                    } else if (conversation.messages.isNotEmpty() && cacheBelongsToBranch(conversation, files)) {
+                        HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                            nextTurn = maxOf(
+                                conversation.nextTurnNo,
+                                (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1
+                            ),
+                            messages = HistoryMd.completedMessages(conversation.messages).map {
+                                it.copy(branchId = it.branchId ?: files.activeBranchId)
+                            },
                             branchId = files.activeBranchId
                         )
                     } else {
@@ -749,8 +786,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     // A blank branch may be seeded from cache only when the cache belongs to
                     // that same branch. Never copy another branch into an intentionally empty one.
                     if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty() &&
-                        (existing?.activeBranchId == sessionFiles.activeBranchId ||
-                            (existing?.activeBranchId == null && sessionFiles.activeBranchId == "branch_01")) &&
+                        existing != null && cacheBelongsToBranch(existing, sessionFiles) &&
                         sessionFiles.branches.firstOrNull { it.id == sessionFiles.activeBranchId }?.messageIds.isNullOrEmpty()
                     ) {
                         historyDocument = HistoryMd.empty(sessionId, existing!!.title, existing.createdAt).copy(

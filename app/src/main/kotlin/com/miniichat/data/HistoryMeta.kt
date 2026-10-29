@@ -122,9 +122,10 @@ object HistoryMeta {
                 branchId = message.branchId ?: prior?.branchId ?: document.branchId
             )
         }
+        // The supplied branch list is the current on-disk inventory. Do not keep stale
+        // entries for Markdown files that have been deleted outside the app.
         val branchMap = linkedMapOf<String, HistoryBranchMetadata>()
-        previous.branches.forEach { branchMap[it.id] = it }
-        branches.forEach { branchMap[it.id] = it }
+        (branches.ifEmpty { previous.branches }).forEach { branchMap[it.id] = it }
         val activeBranch = branchMap[activeBranchId]
         if (activeBranch != null) {
             branchMap[activeBranchId] = activeBranch.copy(messageIds = document.messages.map { it.id })
@@ -182,17 +183,20 @@ object HistoryMeta {
             )
         }
         val branchMap = linkedMapOf<String, HistoryBranchMetadata>()
-        previous.branches.forEach { branchMap[it.id] = it }
-        branches.forEach { incoming ->
-            val old = branchMap[incoming.id]
-            branchMap[incoming.id] = when {
-                incoming.id == branchId -> incoming.copy(messageIds = document.messages.map { it.id })
-                old != null -> incoming.copy(messageIds = old.messageIds)
-                else -> incoming
+        val inventory = branches.ifEmpty { previous.branches }
+        inventory.forEach { incoming ->
+            val old = previous.branches.firstOrNull { it.id == incoming.id }
+            branchMap[incoming.id] = if (incoming.id == branchId) {
+                incoming.copy(messageIds = document.messages.map { it.id })
+            } else {
+                // Preserve known membership when scanning another branch, unless that branch
+                // is itself the Markdown file currently being synchronized.
+                incoming.copy(messageIds = old?.messageIds ?: incoming.messageIds)
             }
         }
         val maxNumber = branchMap.keys.mapNotNull { it.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1
-        val active = previous.activeBranchId.takeIf { id -> branchMap.containsKey(id) } ?: branchId
+        val active = previous.activeBranchId.takeIf { id -> branchMap.containsKey(id) }
+            ?: inventory.lastOrNull()?.id ?: branchId
         return json.encodeToString(
             previous.copy(
                 version = 2,

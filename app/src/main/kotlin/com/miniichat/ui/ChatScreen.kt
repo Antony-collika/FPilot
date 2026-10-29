@@ -142,12 +142,22 @@ fun ChatScreen(
         )
 
         if (messages.isEmpty()) {
-            EmptyState(
-                onPick = { onSend(it, emptyList()) },
-                onOpenSettings = onOpenSettings,
-                showSettingsHint = activeProvider == null,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (conversation != null) {
+                    HistoryBranchSelector(
+                        branches = conversation.historyBranches,
+                        activeBranchId = conversation.activeBranchId,
+                        enabled = !isStreaming,
+                        onSelect = onSwitchBranch
+                    )
+                }
+                EmptyState(
+                    onPick = { onSend(it, emptyList()) },
+                    onOpenSettings = onOpenSettings,
+                    showSettingsHint = activeProvider == null,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         } else {
             LazyColumn(
                 state = listState,
@@ -155,6 +165,16 @@ fun ChatScreen(
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
+                if (conversation != null && messages.none { it.role == "assistant" }) {
+                    item(key = "history-branch-selector") {
+                        HistoryBranchSelector(
+                            branches = conversation.historyBranches,
+                            activeBranchId = conversation.activeBranchId,
+                            enabled = !isStreaming,
+                            onSelect = onSwitchBranch
+                        )
+                    }
+                }
                 items(messages, key = { it.id }) { msg ->
                     Column {
                         if (msg.role == "assistant" && conversation != null) {

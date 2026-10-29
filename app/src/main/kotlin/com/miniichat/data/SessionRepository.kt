@@ -84,7 +84,9 @@ interface SessionFilesRepository {
             writeText(files.historyMetaUri, metadata)
             writeText(files.historyUri, markdown)
         } catch (failure: Exception) {
-            runCatching { writeText(files.historyMetaUri, HistoryMeta.renderRetainingPrevious(previousMetadata, branchDocument)) }
+            // Restore the exact previous pair. The old metadata still contains all message
+            // IDs referenced by the previous Markdown, so either rollback step is recoverable.
+            runCatching { writeText(files.historyMetaUri, previousMetadata) }
                 .exceptionOrNull()?.let { failure.addSuppressed(it) }
             runCatching { writeText(files.historyUri, previousMarkdown) }
                 .exceptionOrNull()?.let { failure.addSuppressed(it) }

@@ -81,7 +81,13 @@ class FileSessionStore(
             } else {
                 runCatching {
                     HistoryMd.parse(legacyText, sessionId, "New chat", metadataText, "branch_01")
-                }.getOrNull()
+                }.getOrElse {
+                    // If metadata is corrupt, parse the Markdown on its own. This supports both
+                    // legacy inline json-meta and the ID-linked sidecar format.
+                    runCatching {
+                        HistoryMd.parse(legacyText, sessionId, "New chat", null, "branch_01")
+                    }.getOrNull()
+                }
             }
             val recovered = (parsedLegacy ?: HistoryMd.empty(sessionId, "New chat")).copy(branchId = "branch_01")
             if (parsedLegacy != null || legacyText.isBlank()) {
@@ -118,11 +124,6 @@ class FileSessionStore(
         } else if (metadata == null) {
             // If JSON was removed or corrupted, recover branch identities and message IDs from
             // Markdown. Cache-backed fields are merged by ChatViewModel before the next write.
-            if (metaChild != null && !metadataText.isNullOrBlank()) {
-                runCatching {
-                    backupFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, metaChild!!.id).toString())
-                }
-            }
             val ordered = branchChildren.sortedBy {
                 BRANCH_FILE.matchEntire(it.name)?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
             }
@@ -154,6 +155,20 @@ class FileSessionStore(
         if (branchChildren.isEmpty()) {
             throw IOException("No history_branch_NN.md files are available.")
         }
+        // Avoid leaving a misleading history.md next to the real branch files. Once a
+        // branch transcript and metadata exist, archive the former canonical file.
+        val legacyHistory = children.firstOrNull { !it.isDirectory && it.name == "history.md" }
+        if (legacyHistory != null) {
+            val legacyUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, legacyHistory.id)
+            val renamed = runCatching {
+                DocumentsContract.renameDocument(resolver, legacyUri, "history_legacy_backup.md")
+            }.getOrNull()
+            if (renamed == null) {
+                val backedUp = runCatching { backupFile(legacyUri.toString()) }.isSuccess
+                if (backedUp) runCatching { DocumentsContract.deleteDocument(resolver, legacyUri) }
+            }
+            children = listChildren(treeUri, folder)
+        }
         val currentMeta = metadata ?: run {
             val latestText = metaChild?.let {
                 readText(DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString())
@@ -163,7 +178,11 @@ class FileSessionStore(
         val existingById = currentMeta.branches.associateBy { it.id }
         val diskById = branchChildren.associateBy { branchIdFromFile(it.name) }
         val reconciledBranches = diskById.map { (id, child) ->
-            existingById[id]?.copy(file = child.name) ?: HistoryBranchMetadata(
+            val existingBranch = existingById[id]
+            existingBranch?.copy(
+                file = child.name,
+                parentBranchId = existingBranch.parentBranchId?.takeIf { it in diskById.keys }
+            ) ?: HistoryBranchMetadata(
                 id = id,
                 file = child.name,
                 parentBranchId = currentMeta.activeBranchId.takeIf { it != id && it in diskById.keys },
@@ -227,9 +246,9 @@ class FileSessionStore(
             historyMetaUri = metaUri.toString(),
             directoryUri = folder.toString(),
             storageTreeUri = storageTreeUri,
-            activeBranchId = activeId,
-            branches = reconciledBranches,
-            nextBranchNumber = normalized.nextBranchNumber
+            activeBranchId = finalMeta.activeBranchId,
+            branches = finalMeta.branches,
+            nextBranchNumber = finalMeta.nextBranchNumber
         )
     }
 
@@ -271,7 +290,15 @@ class FileSessionStore(
             files.nextBranchNumber
         )
         HistoryMeta.parse(rendered, files.sessionId)
-        if (rendered != previousText) writeText(metadataUri, rendered)
+        if (rendered != previousText) {
+            try {
+                writeText(metadataUri, rendered)
+            } catch (failure: Exception) {
+                runCatching { writeText(metadataUri, previousText) }
+                    .exceptionOrNull()?.let { failure.addSuppressed(it) }
+                throw failure
+            }
+        }
     }
 
     override suspend fun switchHistoryBranch(files: SessionFiles, branchId: String): SessionFiles {
@@ -286,7 +313,13 @@ class FileSessionStore(
             ?: throw IOException("The Markdown file for $branchId is missing.")
         val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id)
         val updated = HistoryMeta.setActiveBranch(metadataText, files.sessionId, branchId)
-        writeText(metadataUri, updated)
+        try {
+            writeText(metadataUri, updated)
+        } catch (failure: Exception) {
+            runCatching { writeText(metadataUri, metadataText) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
+            throw failure
+        }
         return files.copy(
             historyUri = uri.toString(),
             activeBranchId = branchId,
@@ -336,6 +369,8 @@ class FileSessionStore(
             writeText(branchUri.toString(), markdown)
             writeText(metadataUri, updatedMetadata)
         } catch (failure: Exception) {
+            runCatching { writeText(metadataUri, metadataText) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
             runCatching { DocumentsContract.deleteDocument(resolver, branchUri) }
                 .exceptionOrNull()?.let { failure.addSuppressed(it) }
             throw failure

@@ -109,6 +109,14 @@ fun HistoryManagerScreen(
                     )
                 }
                 if (turns.isEmpty()) {
+                    if (conversation != null) {
+                        HistoryBranchSelector(
+                            branches = conversation.historyBranches,
+                            activeBranchId = conversation.activeBranchId,
+                            enabled = !isBusy,
+                            onSelect = onSwitchBranch
+                        )
+                    }
                     Text("This chat has no messages yet.", style = MaterialTheme.typography.bodyMedium)
                 }
             }
