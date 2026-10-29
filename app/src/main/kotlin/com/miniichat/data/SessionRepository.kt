@@ -31,7 +31,9 @@ data class SessionFiles(
     val sessionId: String,
     val directoryName: String,
     val historyUri: String,
-    val memoryUri: String
+    val memoryUri: String,
+    /** Non-null only for sessions created with the ID-linked sidecar format. */
+    val historyMetaUri: String? = null
 )
 
 interface SessionFilesRepository {
@@ -42,4 +44,26 @@ interface SessionFilesRepository {
     suspend fun repairHistory(uriString: String, sessionId: String, title: String = "New chat"): String
     suspend fun repairMemory(uriString: String): String
     suspend fun createHistoryTemplate(uriString: String, sessionId: String, title: String = "New chat")
+
+    suspend fun readHistory(files: SessionFiles, fallbackTitle: String = "New chat"): HistoryDocument {
+        val markdown = readText(files.historyUri)
+        val metadata = files.historyMetaUri?.let { readText(it) }
+        return HistoryMd.parse(markdown, files.sessionId, fallbackTitle, metadata)
+    }
+
+    /** Validate both serialized representations before writing either file. */
+    suspend fun writeHistory(files: SessionFiles, document: HistoryDocument) {
+        if (files.historyMetaUri == null) {
+            writeText(files.historyUri, HistoryMd.render(document))
+            return
+        }
+        val metadata = HistoryMeta.render(document)
+        HistoryMeta.parse(metadata, document.sessionId)
+        val markdown = HistoryMd.render(document, sidecarFormat = true)
+        HistoryMd.parse(markdown, document.sessionId, document.title, metadata)
+        // Write metadata first: if the Markdown write fails, extra unused IDs are harmless
+        // and the existing transcript remains the authoritative source of visible messages.
+        writeText(files.historyMetaUri, metadata)
+        writeText(files.historyUri, markdown)
+    }
 }
