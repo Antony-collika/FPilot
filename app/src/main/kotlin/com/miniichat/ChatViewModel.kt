@@ -389,6 +389,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val files = fileSessionStore.ensureSession(storageUri, sessionId)
                 val raw = fileSessionStore.readText(files.historyUri)
+                if (raw.isBlank()) {
+                    // A blank Markdown file with non-empty sidecar metadata is corruption,
+                    // not an empty history to be silently reseeded from cache.
+                    fileSessionStore.readHistory(files, conversation.title)
+                }
                 val backup = fileSessionStore.backupFile(files.historyUri)
                 val repairedDocument = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
                     HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
