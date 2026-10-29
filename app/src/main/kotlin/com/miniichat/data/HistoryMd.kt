@@ -37,6 +37,7 @@ private data class HistoryBlock(
 /** Markdown codec for file-backed sessions. Message bodies remain human-editable. */
 object HistoryMd {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
+    private val compactJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val heading = Regex("^## T([0-9]+) (user|assistant|round ([0-9]+))$")
     private val sessionPattern = Regex("[0-9a-f]{8}")
 
@@ -267,7 +268,7 @@ object HistoryMd {
                 }
                 if (message.role != "user" && message.role != "assistant") return@forEach
                 out.append("## T").append(turn).append(" ").append(message.role).append("\n")
-                out.append(json.encodeToString(MessageId(message.id))).append("\n")
+                out.append(compactJson.encodeToString(MessageId(message.id))).append("\n")
                 out.append(escape(message.content)).append("\n\n")
             }
             return out.toString()
