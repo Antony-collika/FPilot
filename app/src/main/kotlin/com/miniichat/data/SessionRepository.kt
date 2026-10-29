@@ -61,22 +61,24 @@ interface SessionFilesRepository {
         HistoryMeta.parse(metadata, document.sessionId)
         val markdown = HistoryMd.render(document, sidecarFormat = true)
         HistoryMd.parse(markdown, document.sessionId, document.title, metadata)
-        // SAF does not provide a portable atomic transaction across two documents.
-        // Keep the previous bytes in memory and attempt restoration if either write fails.
+        // SAF has no portable atomic transaction across two documents. First write a
+        // union containing both old and new IDs, then commit Markdown, and only then prune
+        // unused metadata. A process stop between the first two writes remains readable.
         val previousMetadata = readText(files.historyMetaUri)
         val previousMarkdown = readText(files.historyUri)
+        val retainedMetadata = HistoryMeta.renderRetainingPrevious(previousMetadata, document)
         try {
-            writeText(files.historyMetaUri, metadata)
+            writeText(files.historyMetaUri, retainedMetadata)
             writeText(files.historyUri, markdown)
+            writeText(files.historyMetaUri, metadata)
         } catch (failure: Exception) {
-            val metadataRestoreFailure = runCatching {
-                writeText(files.historyMetaUri, previousMetadata)
-            }.exceptionOrNull()
-            val markdownRestoreFailure = runCatching {
-                writeText(files.historyUri, previousMarkdown)
-            }.exceptionOrNull()
-            metadataRestoreFailure?.let { failure.addSuppressed(it) }
-            markdownRestoreFailure?.let { failure.addSuppressed(it) }
+            // Restore in an order where the intermediate sidecar accepts either transcript.
+            runCatching { writeText(files.historyMetaUri, retainedMetadata) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
+            runCatching { writeText(files.historyUri, previousMarkdown) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
+            runCatching { writeText(files.historyMetaUri, previousMetadata) }
+                .exceptionOrNull()?.let { failure.addSuppressed(it) }
             throw failure
         }
     }
