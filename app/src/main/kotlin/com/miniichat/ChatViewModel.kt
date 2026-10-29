@@ -55,6 +55,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -263,32 +265,97 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun respondToToolApproval(approved: Boolean) { approvalCompletion?.complete(approved) }
 
+    private val historySyncMutex = Mutex()
+
     fun selectConversation(id: String?) {
         _activeId.value = id
         if (id == null || _isStreaming.value) return
         viewModelScope.launch {
-            val conversation = store.snapshot().firstOrNull { it.id == id } ?: return@launch
-            val sessionId = conversation.sessionId ?: return@launch
-            val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return@launch
-            try {
-                val files = fileSessionStore.ensureSession(storageUri, sessionId)
-                val raw = fileSessionStore.readText(files.historyUri)
-                val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
-                    HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
-                        nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                        messages = HistoryMd.completedMessages(conversation.messages)
-                    ).also { fileSessionStore.writeText(files.historyUri, HistoryMd.render(it)) }
-                } else {
-                    HistoryMd.parse(raw, sessionId, conversation.title)
+            historySyncMutex.withLock { syncHistoryFromFileLocked(id) }
+        }
+    }
+
+    /** Refresh the active file-backed session when the app returns to the foreground. */
+    fun refreshActiveHistory() {
+        val id = _activeId.value ?: return
+        if (_isStreaming.value) return
+        viewModelScope.launch {
+            historySyncMutex.withLock { syncHistoryFromFileLocked(id) }
+        }
+    }
+
+    /** Must be called under historySyncMutex. A blank legacy session file is seeded once. */
+    private suspend fun syncHistoryFromFileLocked(id: String) {
+        val conversation = store.snapshot().firstOrNull { it.id == id } ?: return
+        val sessionId = conversation.sessionId ?: return
+        val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val files = fileSessionStore.ensureSession(storageUri, sessionId)
+            val raw = fileSessionStore.readText(files.historyUri)
+            val document = if (raw.isBlank() && conversation.messages.isNotEmpty()) {
+                HistoryMd.empty(sessionId, conversation.title, conversation.createdAt).copy(
+                    nextTurn = maxOf(conversation.nextTurnNo, (conversation.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                    messages = HistoryMd.completedMessages(conversation.messages)
+                ).also { fileSessionStore.writeText(files.historyUri, HistoryMd.render(it)) }
+            } else {
+                HistoryMd.parse(raw, sessionId, conversation.title)
+            }
+            store.upsert(conversation.copy(
+                title = document.title,
+                messages = document.messages,
+                nextTurnNo = document.nextTurn,
+                createdAt = document.createdAt
+            ))
+        } catch (e: Exception) {
+            _error.value = "Could not load session history: " + (e.message ?: "unknown error")
+        }
+    }
+
+    /** Applies an in-app history edit to the latest file version and commits it to disk first. */
+    private fun persistHistoryEdit(id: String, transform: (Conversation) -> Conversation) {
+        viewModelScope.launch {
+            historySyncMutex.withLock {
+                val current = store.snapshot().firstOrNull { it.id == id } ?: return@withLock
+                val sessionId = current.sessionId
+                val storageUri = current.sessionStorageUri?.takeIf { it.isNotBlank() }
+                if (sessionId == null || storageUri == null) {
+                    store.upsert(transform(current).copy(updatedAt = System.currentTimeMillis()))
+                    return@withLock
                 }
-                store.upsert(conversation.copy(
-                    title = document.title,
-                    messages = document.messages,
-                    nextTurnNo = document.nextTurn,
-                    createdAt = document.createdAt
-                ))
-            } catch (e: Exception) {
-                _error.value = "Could not load session history: " + (e.message ?: "unknown error")
+                try {
+                    val files = fileSessionStore.ensureSession(storageUri, sessionId)
+                    val raw = fileSessionStore.readText(files.historyUri)
+                    val latestDocument = if (raw.isBlank() && current.messages.isNotEmpty()) {
+                        HistoryMd.empty(sessionId, current.title, current.createdAt).copy(
+                            nextTurn = maxOf(current.nextTurnNo, (current.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                            messages = HistoryMd.completedMessages(current.messages)
+                        )
+                    } else {
+                        HistoryMd.parse(raw, sessionId, current.title)
+                    }
+                    val latest = current.copy(
+                        title = latestDocument.title,
+                        messages = latestDocument.messages,
+                        nextTurnNo = latestDocument.nextTurn,
+                        createdAt = latestDocument.createdAt
+                    )
+                    val updated = transform(latest).copy(updatedAt = System.currentTimeMillis())
+                    val updatedDocument = latestDocument.copy(
+                        title = updated.title,
+                        nextTurn = maxOf(updated.nextTurnNo, (updated.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                        messages = HistoryMd.completedMessages(updated.messages)
+                    )
+                    fileSessionStore.writeText(files.historyUri, HistoryMd.render(updatedDocument))
+                    val verified = HistoryMd.parse(fileSessionStore.readText(files.historyUri), sessionId, updated.title)
+                    store.upsert(updated.copy(
+                        title = verified.title,
+                        messages = verified.messages,
+                        nextTurnNo = verified.nextTurn,
+                        createdAt = verified.createdAt
+                    ))
+                } catch (e: Exception) {
+                    _error.value = "Could not save chat history: " + (e.message ?: "unknown error")
+                }
             }
         }
     }
@@ -869,24 +936,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Delete a single message in the current conversation. */
     fun deleteMessage(messageId: String) {
         if (isBusy()) return
-        viewModelScope.launch {
-            val convId = _activeId.value ?: return@launch
-            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val newMsgs = conv.messages.filterNot { it.id == messageId }
-            store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
+        val convId = _activeId.value ?: return
+        persistHistoryEdit(convId) { conv ->
+            conv.copy(messages = conv.messages.filterNot { it.id == messageId })
         }
     }
 
     /** Edit a message's text content (no resend). */
     fun editMessage(messageId: String, newContent: String) {
         if (isBusy()) return
-        viewModelScope.launch {
-            val convId = _activeId.value ?: return@launch
-            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val newMsgs = conv.messages.map {
-                if (it.id == messageId) it.copy(content = newContent) else it
-            }
-            store.upsert(conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()))
+        val convId = _activeId.value ?: return
+        persistHistoryEdit(convId) { conv ->
+            conv.copy(messages = conv.messages.map { if (it.id == messageId) it.copy(content = newContent) else it })
         }
     }
 
@@ -1113,8 +1174,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Builds the request the next message would send, without sending it, and describes it as text. */
     suspend fun previewRequest(): String {
+        val activeId = _activeId.value
+        if (activeId != null && !_isStreaming.value) {
+            historySyncMutex.withLock { syncHistoryFromFileLocked(activeId) }
+        }
         val current = settings.value
-        val storedConversation = store.snapshot().firstOrNull { it.id == _activeId.value }
+        val storedConversation = store.snapshot().firstOrNull { it.id == activeId }
         val baseLayout = effectiveLayout()
         val layout = if (
             storedConversation != null &&
@@ -1206,11 +1271,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun changeActiveConversation(transform: (Conversation) -> Conversation) {
-        viewModelScope.launch {
-            val convId = _activeId.value ?: return@launch
-            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            store.upsert(transform(conv).copy(updatedAt = System.currentTimeMillis()))
-        }
+        val convId = _activeId.value ?: return
+        persistHistoryEdit(convId, transform)
     }
 
     /** Deletes a whole turn: the user message and everything up to the next user message. */
