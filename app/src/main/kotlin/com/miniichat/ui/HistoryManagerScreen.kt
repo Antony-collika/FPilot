@@ -136,7 +136,7 @@ fun HistoryManagerScreen(
                                 text = user.content.ifBlank { "(attachment only)" },
                                 enabled = !isBusy,
                                 onEdit = {
-                                    editing = EditRequest("Edit your message", user.content) { onEditMessage(user.id, it) }
+                                    editing = EditRequest("Edit your message", user.content) { value, done -> onEditMessage(user.id, value, done) }
                                 },
                                 onDelete = {
                                     confirming = ConfirmRequest(
@@ -179,8 +179,8 @@ fun HistoryManagerScreen(
                                         text = result.content,
                                         enabled = !isBusy,
                                         onEdit = {
-                                            editing = EditRequest("Edit the tool result", result.content) {
-                                                onEditToolResult(message.id, roundIndex, resultIndex, it, done)
+                                            editing = EditRequest("Edit the tool result", result.content) { value, done ->
+                                                onEditToolResult(message.id, roundIndex, resultIndex, value, done)
                                             }
                                         },
                                         onDelete = null
