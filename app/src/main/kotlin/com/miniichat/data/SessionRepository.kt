@@ -61,9 +61,23 @@ interface SessionFilesRepository {
         HistoryMeta.parse(metadata, document.sessionId)
         val markdown = HistoryMd.render(document, sidecarFormat = true)
         HistoryMd.parse(markdown, document.sessionId, document.title, metadata)
-        // Write metadata first: if the Markdown write fails, extra unused IDs are harmless
-        // and the existing transcript remains the authoritative source of visible messages.
-        writeText(files.historyMetaUri, metadata)
-        writeText(files.historyUri, markdown)
+        // SAF does not provide a portable atomic transaction across two documents.
+        // Keep the previous bytes in memory and attempt restoration if either write fails.
+        val previousMetadata = readText(files.historyMetaUri)
+        val previousMarkdown = readText(files.historyUri)
+        try {
+            writeText(files.historyMetaUri, metadata)
+            writeText(files.historyUri, markdown)
+        } catch (failure: Exception) {
+            val metadataRestoreFailure = runCatching {
+                writeText(files.historyMetaUri, previousMetadata)
+            }.exceptionOrNull()
+            val markdownRestoreFailure = runCatching {
+                writeText(files.historyUri, previousMarkdown)
+            }.exceptionOrNull()
+            metadataRestoreFailure?.let(failure::addSuppressed)
+            markdownRestoreFailure?.let(failure::addSuppressed)
+            throw failure
+        }
     }
 }
