@@ -863,7 +863,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         try {
                             if (turnSucceeded) {
                                 // Re-read immediately before writing so edits made during the request survive.
-                                val latestText = fileSessionStore.readText(sessionFiles.historyUri)
                                 val latest = fileSessionStore.readHistory(sessionFiles, baseTitle)
                                 val persistedTurn = maxOf(turnNo, latest.nextTurn)
                                 val persistedUser = userMsg.copy(turnNo = persistedTurn)
