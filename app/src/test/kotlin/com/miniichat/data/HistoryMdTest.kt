@@ -122,4 +122,60 @@ broken
         val rendered = HistoryMd.render(repaired)
         assertTrue(rendered.startsWith("---\nsession: a3f9c1d2"))
     }
+
+    @Test
+    fun sidecarFormatKeepsReadableMarkdownAndFullMetadataByMessageId() {
+        val round = ToolRound(
+            content = "tool round",
+            toolCalls = listOf(StoredToolCall("call_1", "read_file", """{"path":"a.md"}""")),
+            results = listOf(StoredToolResult("call_1", "read_file", "result")),
+            workspaceUri = "workspace://tree"
+        )
+        val source = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Sidecar session",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 2,
+            messages = listOf(
+                Message("u1", "user", "hello", attachments = listOf(Attachment("file", "content://x", "text/plain", "x.txt")), createdAt = 11, turnNo = 1),
+                Message("a1", "assistant", "answer", createdAt = 12, extraContent = buildJsonObject { put("trace", "yes") }, toolRounds = listOf(round))
+            )
+        )
+
+        val markdown = HistoryMd.render(source, sidecarFormat = true)
+        val sidecar = HistoryMeta.render(source)
+        val parsed = HistoryMd.parse(markdown, source.sessionId, source.title, sidecar)
+
+        assertTrue(markdown.contains("""{"id":"u1"}"""))
+        assertTrue(markdown.contains("""{"id":"a1"}"""))
+        assertFalse(markdown.contains("json-meta"))
+        assertFalse(markdown.contains("json-round"))
+        assertEquals(source.messages.map { it.id }, parsed.messages.map { it.id })
+        assertEquals(source.messages[0].attachments, parsed.messages[0].attachments)
+        assertEquals(source.messages[0].createdAt, parsed.messages[0].createdAt)
+        assertEquals(source.messages[1].extraContent, parsed.messages[1].extraContent)
+        assertEquals(round, parsed.messages[1].toolRounds.single())
+        assertEquals(source.messages.map { it.content }, parsed.messages.map { it.content })
+    }
+
+    @Test
+    fun sidecarFormatSupportsAnOrphanAssistantMessageAndRejectsMissingMetadata() {
+        val source = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Orphan",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 4,
+            messages = listOf(Message("a1", "assistant", "answer", createdAt = 12))
+        )
+        val markdown = HistoryMd.render(source, sidecarFormat = true)
+        val sidecar = HistoryMeta.render(source)
+        assertEquals(listOf("a1"), HistoryMd.parse(markdown, source.sessionId, source.title, sidecar).messages.map { it.id })
+
+        try {
+            HistoryMd.parse(markdown, source.sessionId, source.title, HistoryMeta.empty(source.sessionId))
+            throw AssertionError("Expected HistoryFormatException")
+        } catch (error: HistoryFormatException) {
+            assertTrue(error.message!!.contains("missing from history.meta.json"))
+        }
+    }
 }
