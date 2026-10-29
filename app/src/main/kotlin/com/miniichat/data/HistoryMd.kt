@@ -349,9 +349,75 @@ object HistoryMd {
         metadataText: String? = null
     ): HistoryDocument {
         if (metadataText != null) {
-            // Never run the legacy salvage routine on sidecar-format data: it would not
-            // understand ID lines and could silently discard IDs or tool metadata.
-            return parse(text, fallbackSessionId, fallbackTitle, metadataText)
+            try { return parse(text, fallbackSessionId, fallbackTitle, metadataText) } catch (_: Exception) {
+                // Salvage sidecar-format message blocks independently. Never send this format
+                // through the legacy turn-pair salvage routine, which does not understand IDs.
+            }
+            val metadata = HistoryMeta.parse(metadataText, fallbackSessionId)
+            val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            val notes = mutableListOf<String>()
+            val headerEnd = if (lines.firstOrNull() == "---") {
+                (1 until lines.size).firstOrNull { lines[it] == "---" }
+            } else null
+            val base = if (headerEnd != null) {
+                val headerOnly = lines.take(headerEnd + 1).joinToString("\n") + "\n"
+                runCatching { parse(headerOnly, fallbackSessionId, fallbackTitle, metadataText) }.getOrElse {
+                    notes += "Rebuilt invalid front matter using the fallback session details."
+                    empty(fallbackSessionId, fallbackTitle)
+                }
+            } else {
+                notes += "Rebuilt missing or invalid front matter using the fallback session details."
+                empty(fallbackSessionId, fallbackTitle)
+            }
+            val searchStart = headerEnd?.plus(1) ?: 0
+            val boundaries = (searchStart until lines.size).filter { lines[it].startsWith("## T") }
+            val starts = boundaries.filter { heading.matches(lines[it]) }
+            boundaries.filterNot { heading.matches(lines[it]) }.forEach {
+                notes += "Skipped malformed heading at original line " + (it + 1) + ": " + lines[it]
+            }
+            val valid = mutableListOf<Message>()
+            val seenIds = mutableSetOf<String>()
+            var maxTurn = 0
+            starts.forEachIndexed { index, start ->
+                val match = heading.matchEntire(lines[start]) ?: return@forEachIndexed
+                val turn = match.groupValues[1].toIntOrNull() ?: return@forEachIndexed
+                val kind = match.groupValues[2]
+                if (kind != "user" && kind != "assistant") {
+                    notes += "Skipped unsupported block at original line " + (start + 1) + "."
+                    return@forEachIndexed
+                }
+                val end = boundaries.firstOrNull { it > start } ?: lines.size
+                val block = HistoryBlock(turn, kind, 0, start + 1, lines.subList(start + 1, end))
+                val id = runCatching {
+                    compactJson.decodeFromString<MessageId>(block.lines.firstOrNull().orEmpty()).id
+                }.getOrNull()
+                if (id.isNullOrBlank()) {
+                    notes += "Skipped message block without a valid ID at original line " + (start + 1) + "."
+                    return@forEachIndexed
+                }
+                if (!metadata.messages.containsKey(id)) {
+                    notes += "Skipped message ID '$id' because its metadata is missing."
+                    return@forEachIndexed
+                }
+                if (!seenIds.add(id)) {
+                    notes += "Skipped duplicate message ID '$id'."
+                    return@forEachIndexed
+                }
+                val parsed = runCatching {
+                    parseSidecarFormat(base.sessionId, base.title, base.createdAt, base.nextTurn, listOf(block), metadataText)
+                }.getOrElse {
+                    notes += "Skipped invalid message block at original line " + (start + 1) + "."
+                    return@forEachIndexed
+                }
+                valid += parsed.messages
+                maxTurn = maxOf(maxTurn, turn)
+            }
+            if (notes.isEmpty()) notes += "Rebuilt the history while retaining valid ID-linked message blocks."
+            return base.copy(
+                messages = valid,
+                nextTurn = maxOf(base.nextTurn, maxTurn + 1),
+                repairNotes = notes
+            )
         }
         try { return parse(text, fallbackSessionId, fallbackTitle) } catch (_: Exception) { /* salvage valid turns below */ }
         val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
