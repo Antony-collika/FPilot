@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +78,7 @@ fun RequestPanelScreen(
     settings: AppSettings,
     hasWorkspace: Boolean,
     historyTurnCount: Int,
+    historyRevision: Int,
     onBack: () -> Unit,
     onLayoutChange: (RequestLayout) -> Unit,
     onAddCard: (RequestLayout, RequestCard) -> Unit,
@@ -90,6 +92,10 @@ fun RequestPanelScreen(
     var notice by remember { mutableStateOf<String?>(null) }
     var previewText by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(historyRevision) {
+        if (previewText != null) previewText = makePreview()
+    }
 
     val hasTools = layout.cards.any { it.role == CardRole.TOOLS }
     val hasMemory = layout.cards.any { it.role == CardRole.MEMORY }
