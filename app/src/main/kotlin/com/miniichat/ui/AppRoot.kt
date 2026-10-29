@@ -439,11 +439,11 @@ fun AppRoot(vm: ChatViewModel) {
                     conversation = activeConv,
                     isBusy = isStreaming,
                     onBack = { screen = Screen.RequestPanel },
-                    onEditMessage = { id, text -> vm.editMessage(id, text) },
+                    onEditMessage = { id, text, done -> vm.editMessage(id, text, done) },
                     onDeleteMessage = { id -> vm.deleteMessage(id) },
                     onDeleteTurn = { id -> vm.deleteTurn(id) },
                     onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
-                    onEditToolResult = { id, round, result, text -> vm.editToolResult(id, round, result, text) }
+                    onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) }
                 )
             }
             Screen.Providers -> {
