@@ -624,7 +624,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 ?: sessionId?.let { current.storageTreeUri.takeIf(String::isNotBlank) }
             val sessionFiles = if (sessionId != null && !sessionStorageUri.isNullOrBlank()) {
                 try {
-                    fileSessionStore.ensureSession(sessionStorageUri, sessionId)
+                    fileSessionStore.ensureSession(
+                        sessionStorageUri,
+                        sessionId,
+                        useSidecarForNewSession = existing?.sessionId == null
+                    )
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
