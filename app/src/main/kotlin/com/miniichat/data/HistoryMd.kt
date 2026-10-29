@@ -53,7 +53,19 @@ object HistoryMd {
         HistoryDocument(sessionId, title, createdAt, 1, emptyList())
 
     fun parse(text: String, fallbackSessionId: String, fallbackTitle: String = "New chat", metadataText: String? = null): HistoryDocument {
-        if (text.isBlank()) return empty(fallbackSessionId, fallbackTitle)
+        if (text.isBlank()) {
+            if (metadataText != null) {
+                val metadata = try {
+                    HistoryMeta.parse(metadataText, fallbackSessionId)
+                } catch (error: Exception) {
+                    throw HistoryFormatException(1, "history.meta.json", "Invalid sidecar metadata: " + (error.message ?: "unknown error"))
+                }
+                if (metadata.messages.isNotEmpty()) {
+                    throw HistoryFormatException(1, "", "history.md is empty but history.meta.json still contains message metadata.")
+                }
+            }
+            return empty(fallbackSessionId, fallbackTitle)
+        }
         val lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         if (lines.firstOrNull() != "---") {
             throw HistoryFormatException(1, lines.firstOrNull().orEmpty(), "Expected front matter beginning with ---.")
@@ -115,6 +127,12 @@ object HistoryMd {
 
         if (metadataText != null) {
             return parseSidecarFormat(session, title, createdAt, declaredNext, blocks, metadataText)
+        }
+        val idLineFound = blocks.firstOrNull { block ->
+            runCatching { compactJson.decodeFromString<MessageId>(block.lines.firstOrNull().orEmpty()).id.isNotBlank() }.getOrDefault(false)
+        }
+        if (idLineFound != null && blocks.none { it.lines.any { line -> line.trim() == "```json-meta" } }) {
+            throw HistoryFormatException(idLineFound.startLine + 1, idLineFound.lines.firstOrNull().orEmpty(), "This history uses the sidecar format, but history.meta.json is missing.")
         }
 
         val turns = linkedMapOf<Int, MutableList<HistoryBlock>>()
