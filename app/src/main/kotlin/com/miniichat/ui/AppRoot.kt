@@ -373,6 +373,7 @@ fun AppRoot(vm: ChatViewModel) {
                     settings = settings,
                     hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
                     historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
+                    historyRevision = activeConv?.messages?.hashCode() ?: 0,
                     onBack = { screen = Screen.Settings },
                     onLayoutChange = { vm.saveLayout(it) },
                     onAddCard = { newLayout, newCard ->
