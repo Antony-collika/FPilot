@@ -128,10 +128,14 @@ object HistoryMd {
         if (metadataText != null) {
             return parseSidecarFormat(session, title, createdAt, declaredNext, blocks, metadataText)
         }
-        val idLineFound = blocks.firstOrNull { block ->
+        val messageBlocks = blocks.filter { it.kind == "user" || it.kind == "assistant" }
+        val idLineFound = messageBlocks.firstOrNull { block ->
             runCatching { compactJson.decodeFromString<MessageId>(block.lines.firstOrNull().orEmpty()).id.isNotBlank() }.getOrDefault(false)
         }
-        if (idLineFound != null && blocks.none { it.lines.any { line -> line.trim() == "```json-meta" } }) {
+        val allBlocksHaveIdLines = messageBlocks.isNotEmpty() && messageBlocks.all { block ->
+            runCatching { compactJson.decodeFromString<MessageId>(block.lines.firstOrNull().orEmpty()).id.isNotBlank() }.getOrDefault(false)
+        }
+        if (idLineFound != null && allBlocksHaveIdLines && blocks.none { it.lines.any { line -> line.trim() == "```json-meta" } }) {
             throw HistoryFormatException(idLineFound.startLine + 1, idLineFound.lines.firstOrNull().orEmpty(), "This history uses the sidecar format, but history.meta.json is missing.")
         }
 
