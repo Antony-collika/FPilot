@@ -230,6 +230,8 @@ fun AppRoot(vm: ChatViewModel) {
     val activeConv = conversations.firstOrNull { it.id == activeId }
     var activeSessionFiles by remember { mutableStateOf<SessionFiles?>(null) }
     LaunchedEffect(activeConv?.id, activeConv?.sessionId, activeConv?.sessionStorageUri) { activeSessionFiles = vm.findSessionFiles(activeConv) }
+    var activeWorkingFiles by remember { mutableStateOf<List<com.miniichat.data.WorkingFile>>(emptyList()) }
+    LaunchedEffect(activeConv?.id, activeConv?.messages) { activeWorkingFiles = vm.findWorkingFiles(activeConv) }
     val openFile: (String) -> Unit = { raw ->
         try {
             val uri = Uri.parse(raw)
@@ -357,10 +359,6 @@ fun AppRoot(vm: ChatViewModel) {
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenRequestLogs = { screen = Screen.RequestLogs },
                         onOpenRequestPanel = { requestPanelReturnScreen = Screen.Chat; screen = Screen.RequestPanel },
-                        hasFileSession = activeConv?.sessionId != null,
-                        onRepairHistory = { vm.repairActiveHistory() },
-                        onRepairMemory = { vm.repairActiveMemory() },
-                        onCreateHistoryTemplate = { vm.createActiveHistoryTemplate() },
                         onPickModel = {
                             if (providers.isEmpty()) {
                                 editingProvider = null
@@ -453,6 +451,10 @@ fun AppRoot(vm: ChatViewModel) {
                             templateCreator.launch("$kind.md")
                         },
                         onOpenHistoryManager = { screen = Screen.HistoryManager },
+                        sessionFiles = activeSessionFiles,
+                        onRepairHistory = { vm.repairActiveHistory() },
+                        onRepairMemory = { vm.repairActiveMemory() },
+                        onCreateHistoryTemplate = { vm.createActiveHistoryTemplate() },
                         onOpenFile = openFile,
                         checkMemory = { vm.memoryReferenceWarning() }
                     )
@@ -468,7 +470,7 @@ fun AppRoot(vm: ChatViewModel) {
                     onDeleteTurn = { id -> vm.deleteTurn(id) },
                     onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
                     onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) },
-                    sessionFiles = activeSessionFiles,
+                    workingFiles = activeWorkingFiles,
                     onOpenFile = openFile
                 )
             }
