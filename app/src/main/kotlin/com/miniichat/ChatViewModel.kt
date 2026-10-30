@@ -1049,7 +1049,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Creates an independent linear session containing the selected user turn and its prefix. */
+    /** Creates an independent linear session ending at the selected message. */
     fun branchFromHere(messageId: String) {
         if (isBusy()) return
         val activeId = _activeId.value ?: return
@@ -1058,9 +1058,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (!syncHistoryFromFileLocked(activeId)) return@withLock
                 val source = store.snapshot().firstOrNull { it.id == activeId } ?: return@withLock
                 val start = source.messages.indexOfFirst { it.id == messageId }
-                if (start < 0 || source.messages[start].role != "user") return@withLock
-                val end = (start + 1 until source.messages.size)
-                    .firstOrNull { source.messages[it].role == "user" } ?: source.messages.size
+                if (start < 0) return@withLock
+                val selectedRole = source.messages[start].role
+                if (selectedRole != "user" && selectedRole != "assistant") return@withLock
+                val end = if (selectedRole == "user") {
+                    (start + 1 until source.messages.size)
+                        .firstOrNull { source.messages[it].role == "user" } ?: source.messages.size
+                } else {
+                    start + 1
+                }
                 val selectedMessages = source.messages.take(end)
                 val storageUri = source.sessionStorageUri?.takeIf { it.isNotBlank() }
                     ?: settings.value.storageTreeUri.takeIf { it.isNotBlank() }
