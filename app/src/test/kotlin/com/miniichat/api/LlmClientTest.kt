@@ -12,6 +12,146 @@ import org.junit.Test
 class LlmClientTest {
     private val client = LlmClient()
 
+
+    @Test
+    fun buildsResponsesRequestWithInputFunctionToolsAndToolOutputs() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://api.openai.com/v1",
+            apiKey = "test",
+            apiProtocol = com.miniichat.data.ProviderApiProtocol.RESPONSES
+        )
+        val tool = ToolDefinition(
+            name = "read_file",
+            description = "Read a file.",
+            parameters = Json.parseToJsonElement(
+                """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""
+            ).jsonObject
+        )
+        val body = Json.parseToJsonElement(
+            client.buildResponsesRequestBody(
+                provider = provider,
+                modelId = "gpt-5.6-sol",
+                messages = listOf(
+                    ChatMessage(role = "system", content = "You are useful."),
+                    ChatMessage(role = "user", content = "Read README.md."),
+                    ChatMessage(
+                        role = "assistant",
+                        content = "",
+                        toolCalls = listOf(ToolCall("call_123", "read_file", """{"path":"README.md"}"""))
+                    ),
+                    ChatMessage(role = "tool", content = "file contents", toolCallId = "call_123", name = "read_file")
+                ),
+                stream = false,
+                tools = listOf(tool)
+            )
+        ).jsonObject
+
+        assertEquals("gpt-5.6-sol", body["model"].toString().trim('"'))
+        assertEquals("false", body["stream"].toString())
+        val input = body["input"]!!.jsonArray
+        assertEquals("system", input[0].jsonObject["role"].toString().trim('"'))
+        assertEquals("function_call", input[2].jsonObject["type"].toString().trim('"'))
+        assertEquals("call_123", input[2].jsonObject["call_id"].toString().trim('"'))
+        assertEquals("function_call_output", input[3].jsonObject["type"].toString().trim('"'))
+        assertEquals("call_123", input[3].jsonObject["call_id"].toString().trim('"'))
+        val function = body["tools"]!!.jsonArray.single().jsonObject
+        assertEquals("read_file", function["name"].toString().trim('"'))
+        assertEquals("false", function["strict"].toString())
+        assertEquals("auto", body["tool_choice"].toString().trim('"'))
+    }
+
+    @Test
+    fun parsesResponsesAndReplaysOpaqueReasoningAndFunctionCallItems() {
+        val response = """
+            {
+              "id": "resp_123",
+              "output": [
+                {
+                  "type": "reasoning",
+                  "id": "rs_123",
+                  "encrypted_content": "opaque-reasoning-payload",
+                  "summary": []
+                },
+                {
+                  "type": "message",
+                  "id": "msg_123",
+                  "role": "assistant",
+                  "content": [{"type":"output_text","text":"Inspecting the file."}]
+                },
+                {
+                  "type": "function_call",
+                  "id": "fc_123",
+                  "call_id": "call_123",
+                  "name": "read_file",
+                  "arguments": "{\"path\":\"README.md\"}"
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsed = client.parseResponsesCompletionResponse(response)
+        assertEquals("Inspecting the file.", parsed.content)
+        assertEquals("call_123", parsed.toolCalls!!.single().id)
+        assertEquals("read_file", parsed.toolCalls!!.single().name)
+
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://api.openai.com/v1",
+            apiKey = "test",
+            apiProtocol = com.miniichat.data.ProviderApiProtocol.RESPONSES
+        )
+        val input = Json.parseToJsonElement(
+            client.buildResponsesRequestBody(
+                provider = provider,
+                modelId = "gpt-5.6-sol",
+                messages = listOf(
+                    parsed,
+                    ChatMessage(role = "tool", content = "contents", toolCallId = "call_123")
+                ),
+                stream = false
+            )
+        ).jsonObject["input"]!!.jsonArray
+
+        assertEquals("reasoning", input[0].jsonObject["type"].toString().trim('"'))
+        assertEquals("opaque-reasoning-payload", input[0].jsonObject["encrypted_content"].toString().trim('"'))
+        assertEquals("function_call", input[2].jsonObject["type"].toString().trim('"'))
+        assertEquals("function_call_output", input[3].jsonObject["type"].toString().trim('"'))
+    }
+
+    @Test
+    fun mapsImagesToResponsesInputImageParts() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://api.openai.com/v1",
+            apiKey = "test",
+            apiProtocol = com.miniichat.data.ProviderApiProtocol.RESPONSES
+        )
+        val body = Json.parseToJsonElement(
+            client.buildResponsesRequestBody(
+                provider = provider,
+                modelId = "gpt-5.6-sol",
+                messages = listOf(
+                    ChatMessage(
+                        role = "user",
+                        content = "Describe this image.",
+                        parts = listOf(
+                            ChatPart(type = "text", text = "Describe this image."),
+                            ChatPart(type = "image_url", imageUrl = ChatPart.ImageUrl("data:image/png;base64,AAAA", "high"))
+                        )
+                    )
+                ),
+                stream = false
+            )
+        ).jsonObject
+        val parts = body["input"]!!.jsonArray.single().jsonObject["content"]!!.jsonArray
+        assertEquals("input_text", parts[0].jsonObject["type"].toString().trim('"'))
+        assertEquals("input_image", parts[1].jsonObject["type"].toString().trim('"'))
+        assertEquals("high", parts[1].jsonObject["detail"].toString().trim('"'))
+    }
+
     @Test
     fun parsesNullToolCallsAsNoCalls() {
         val message = client.parseCompletionResponse(

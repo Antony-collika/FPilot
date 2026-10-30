@@ -2,6 +2,11 @@ package com.miniichat.data
 
 import kotlinx.serialization.Serializable
 
+object ProviderApiProtocol {
+    const val CHAT_COMPLETIONS = "chat_completions"
+    const val RESPONSES = "responses"
+}
+
 @Serializable
 data class ProviderConfig(
     val id: String,
@@ -11,6 +16,7 @@ data class ProviderConfig(
     val models: List<String> = emptyList(),
     val customHeaders: Map<String, String> = emptyMap(),
     val extraBody: Map<String, String> = emptyMap(),
+    val apiProtocol: String = ProviderApiProtocol.CHAT_COMPLETIONS,
     val createdAt: Long = System.currentTimeMillis()
 )
 

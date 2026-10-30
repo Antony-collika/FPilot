@@ -2,6 +2,7 @@ package com.miniichat.api
 
 import com.miniichat.data.AppSettings
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.ProviderApiProtocol
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -27,10 +28,14 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.URI
 
@@ -123,6 +128,7 @@ private data class ModelsResponse(val data: List<ModelEntry> = emptyList())
 
 class LlmClient {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+    private val responsesOutputKey = "fpilot_responses_output"
 
     private val _requestLogs = MutableStateFlow("")
     val requestLogs: StateFlow<String> = _requestLogs.asStateFlow()
@@ -177,16 +183,12 @@ class LlmClient {
     }
 
     private fun chatEndpoint(baseUrl: String) = "${baseUrl.trimEnd('/')}/chat/completions"
+    private fun responsesEndpoint(baseUrl: String) = "${baseUrl.trimEnd('/')}/responses"
     private fun modelsEndpoint(baseUrl: String) = "${baseUrl.trimEnd('/')}/models"
 
     /** Best-effort parse of a value that may be a number, bool, or string. */
-    private fun coerceToJson(v: String): JsonElement {
-        if (v.equals("true", true)) return JsonPrimitive(true)
-        if (v.equals("false", true)) return JsonPrimitive(false)
-        v.toDoubleOrNull()?.let { return JsonPrimitive(it) }
-        v.toLongOrNull()?.let { return JsonPrimitive(it) }
-        return JsonPrimitive(v)
-    }
+    private fun coerceToJson(v: String): JsonElement =
+        runCatching { json.parseToJsonElement(v) }.getOrElse { JsonPrimitive(v) }
 
     internal fun buildRequestBody(
         provider: ProviderConfig,
@@ -212,7 +214,14 @@ class LlmClient {
                     }
                     if (!m.toolCallId.isNullOrBlank()) put("tool_call_id", m.toolCallId)
                     if (!m.name.isNullOrBlank()) put("name", m.name)
-                    m.extraContent?.let { put("extra_content", it) }
+                    m.extraContent?.let { metadata ->
+                        val providerMetadata = buildJsonObject {
+                            for ((key, value) in metadata) {
+                                if (key != responsesOutputKey) put(key, value)
+                            }
+                        }
+                        if (providerMetadata.isNotEmpty()) put("extra_content", providerMetadata)
+                    }
                     if (!m.toolCalls.isNullOrEmpty()) {
                         put("tool_calls", kotlinx.serialization.json.buildJsonArray {
                             for (call in m.toolCalls) {
@@ -252,6 +261,104 @@ class LlmClient {
             }
         }
         return json.encodeToString(JsonObject.serializer(), obj)
+    }
+
+    /**
+     * Builds a Responses request and replays original output items so reasoning payloads
+     * remain attached to the assistant turn that produced them.
+     */
+    internal fun buildResponsesRequestBody(
+        provider: ProviderConfig,
+        modelId: String,
+        messages: List<ChatMessage>,
+        stream: Boolean,
+        tools: List<ToolDefinition> = emptyList()
+    ): String {
+        val input = kotlinx.serialization.json.buildJsonArray {
+            for (message in messages) {
+                val savedOutput = message.extraContent?.get(responsesOutputKey) as? JsonArray
+                if (message.role == "assistant" && savedOutput != null) {
+                    savedOutput.forEach { add(it) }
+                    continue
+                }
+                if (message.role == "tool") {
+                    val callId = message.toolCallId
+                        ?: throw IllegalStateException("Responses API requires a call ID for each tool result.")
+                    add(buildJsonObject {
+                        put("type", "function_call_output")
+                        put("call_id", callId)
+                        put("output", message.content)
+                    })
+                    continue
+                }
+                if (message.role == "assistant" && !message.toolCalls.isNullOrEmpty()) {
+                    if (message.content.isNotBlank()) add(buildJsonObject {
+                        put("type", "message")
+                        put("role", "assistant")
+                        put("content", message.content)
+                    })
+                    for (call in message.toolCalls) add(buildJsonObject {
+                        put("type", "function_call")
+                        put("call_id", call.id)
+                        put("name", call.name)
+                        put("arguments", call.arguments)
+                    })
+                    continue
+                }
+                add(buildJsonObject {
+                    put("role", message.role)
+                    if (message.isMultipart()) {
+                        put("content", kotlinx.serialization.json.buildJsonArray {
+                            for (part in message.parts.orEmpty()) {
+                                when (part.type) {
+                                    "text" -> add(buildJsonObject {
+                                        put("type", "input_text")
+                                        put("text", part.text.orEmpty())
+                                    })
+                                    "image_url" -> part.imageUrl?.let { image ->
+                                        add(buildJsonObject {
+                                            put("type", "input_image")
+                                            put("image_url", image.url)
+                                            image.detail?.let { put("detail", it) }
+                                        })
+                                    }
+                                }
+                            }
+                        })
+                    } else put("content", message.content)
+                })
+            }
+        }
+
+        val body = buildJsonObject {
+            put("model", modelId)
+            put("input", input)
+            put("stream", stream)
+            put("include", kotlinx.serialization.json.buildJsonArray {
+                add(JsonPrimitive("reasoning.encrypted_content"))
+            })
+            if (tools.isNotEmpty()) {
+                put("tools", kotlinx.serialization.json.buildJsonArray {
+                    for (tool in tools) add(buildJsonObject {
+                        put("type", "function")
+                        put("name", tool.name)
+                        put("description", tool.description)
+                        put("parameters", tool.parameters)
+                        put("strict", false)
+                    })
+                })
+                put("tool_choice", "auto")
+            }
+            for ((key, value) in provider.extraBody) {
+                if (key.isBlank()) continue
+                put(key, coerceToJson(value))
+            }
+        }
+        return json.encodeToString(JsonObject.serializer(), body)
+    }
+
+    private fun responsesMetadata(output: JsonArray): JsonObject = buildJsonObject {
+        put(responsesOutputKey, output)
     }
 
     /**
@@ -317,6 +424,9 @@ class LlmClient {
         tools: List<ToolDefinition>,
         conversationId: String? = null
     ): ChatMessage {
+        if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) {
+            return completeResponsesTurn(provider, modelId, messages, tools)
+        }
         val bodyText = buildRequestBody(
             provider = provider,
             modelId = modelId,
@@ -352,6 +462,82 @@ class LlmClient {
         return parseCompletionResponse(response)
     }
 
+    private suspend fun completeResponsesTurn(
+        provider: ProviderConfig,
+        modelId: String,
+        messages: List<ChatMessage>,
+        tools: List<ToolDefinition>
+    ): ChatMessage {
+        val bodyText = buildResponsesRequestBody(provider, modelId, messages, stream = false, tools = tools)
+        recordRequestBody(bodyText)
+        val response = client.preparePost(responsesEndpoint(provider.baseUrl)) {
+            contentType(ContentType.Application.Json)
+            headers {
+                if (provider.apiKey.isNotBlank()) append(HttpHeaders.Authorization, "Bearer ${provider.apiKey}")
+                append(HttpHeaders.Accept, "application/json")
+                for ((key, value) in provider.customHeaders) if (key.isNotBlank()) append(key, value)
+            }
+            setBody(bodyText)
+        }.execute { resp ->
+            val text = resp.bodyAsText()
+            recordReceivedBody(resp.status.value, text)
+            if (!resp.status.isSuccess()) throw RuntimeException("HTTP ${resp.status.value}: ${text.take(500)}")
+            text
+        }
+        return parseResponsesCompletionResponse(response)
+    }
+
+    /** Parse output and preserve raw items for subsequent requests and persisted history. */
+    internal fun parseResponsesCompletionResponse(response: String): ChatMessage {
+        val root = json.parseToJsonElement(response).jsonObject
+        val output = root["output"] as? JsonArray ?: JsonArray(emptyList())
+        val textParts = mutableListOf<String>()
+        val calls = mutableListOf<ToolCall>()
+        for (element in output) {
+            val item = element as? JsonObject ?: continue
+            when (item["type"]?.jsonPrimitive?.content) {
+                "message" -> {
+                    val parts = item["content"] as? JsonArray ?: JsonArray(emptyList())
+                    for (partElement in parts) {
+                        val part = partElement as? JsonObject ?: continue
+                        when (part["type"]?.jsonPrimitive?.content) {
+                            "output_text", "text" -> part["text"]?.jsonPrimitive?.content
+                                ?.takeIf { it.isNotEmpty() }?.let(textParts::add)
+                            "refusal" -> part["refusal"]?.jsonPrimitive?.content
+                                ?.takeIf { it.isNotEmpty() }?.let(textParts::add)
+                        }
+                    }
+                }
+                "function_call" -> {
+                    val callId = item["call_id"]?.jsonPrimitive?.content
+                        ?: item["id"]?.jsonPrimitive?.content ?: continue
+                    val name = item["name"]?.jsonPrimitive?.content ?: continue
+                    val arguments = item["arguments"]?.jsonPrimitive?.content ?: "{}"
+                    calls += ToolCall(callId, name, arguments)
+                }
+            }
+        }
+        val content = textParts.joinToString("")
+            .ifEmpty { root["output_text"]?.jsonPrimitive?.content.orEmpty() }
+        if (output.isEmpty() && content.isBlank()) {
+            val error = (root["error"] as? JsonObject)?.get("message")?.toString()?.trim('"')
+            throw RuntimeException(error ?: "The Responses API returned no output.")
+        }
+        return ChatMessage(
+            role = "assistant",
+            content = content,
+            toolCalls = calls.takeIf { it.isNotEmpty() },
+            extraContent = if (output.isEmpty()) null else responsesMetadata(output)
+        )
+    }
+
+    private fun responseEventError(event: JsonObject): String? {
+        val nested = event["response"] as? JsonObject
+        val error = (event["error"] as? JsonObject) ?: (nested?.get("error") as? JsonObject)
+        return error?.get("message")?.jsonPrimitive?.content
+            ?: event["message"]?.jsonPrimitive?.content
+    }
+
     /** Parse a non-streaming response while retaining metadata needed by the next agent turn. */
     internal fun parseCompletionResponse(response: String): ChatMessage {
         val parsed = json.decodeFromString(ChatResponse.serializer(), response)
@@ -380,17 +566,24 @@ class LlmClient {
         conversationId: String? = null,
         onExtraContent: (JsonObject) -> Unit = {}
     ): Flow<String> = flow {
-        val bodyText = buildRequestBody(
-            provider = provider,
-            modelId = modelId,
-            messages = messages,
-            stream = settings.stream,
-            temperature = settings.temperature,
-            conversationId = conversationId
-        )
+        val useResponses = provider.apiProtocol == ProviderApiProtocol.RESPONSES
+        val bodyText = if (useResponses) {
+            buildResponsesRequestBody(provider, modelId, messages, stream = settings.stream)
+        } else {
+            buildRequestBody(
+                provider = provider,
+                modelId = modelId,
+                messages = messages,
+                stream = settings.stream,
+                temperature = settings.temperature,
+                conversationId = conversationId
+            )
+        }
         recordRequestBody(bodyText)
 
-        client.preparePost(chatEndpoint(provider.baseUrl)) {
+        client.preparePost(
+            if (useResponses) responsesEndpoint(provider.baseUrl) else chatEndpoint(provider.baseUrl)
+        ) {
             contentType(ContentType.Application.Json)
             headers {
                 if (provider.apiKey.isNotBlank()) {
@@ -406,6 +599,8 @@ class LlmClient {
         }.execute { response ->
             if (settings.stream) {
                 val rawStream = StringBuilder()
+                var streamError: String? = null
+                var receivedTerminalEvent = false
                 val channel: ByteReadChannel = response.bodyAsChannel()
                 try {
                     while (true) {
@@ -419,14 +614,37 @@ class LlmClient {
                         val payload = line.removePrefix("data:").trim()
                         if (payload == "[DONE]") break
                         if (payload.isEmpty()) continue
-                        val chunk = runCatching {
-                            json.decodeFromString(ChatChunk.serializer(), payload)
-                        }.getOrNull() ?: continue
-                        val choice = chunk.choices.firstOrNull()
-                        choice?.delta?.extraContent?.let(onExtraContent)
-                        choice?.message?.extraContent?.let(onExtraContent)
-                        val delta = choice?.delta?.content
-                        if (!delta.isNullOrEmpty()) emit(delta)
+
+                        if (useResponses) {
+                            val event = runCatching { json.parseToJsonElement(payload).jsonObject }.getOrNull()
+                                ?: continue
+                            when (event["type"]?.jsonPrimitive?.content) {
+                                "response.output_text.delta" -> {
+                                    val delta = event["delta"]?.jsonPrimitive?.content
+                                    if (!delta.isNullOrEmpty()) emit(delta)
+                                }
+                                "response.completed", "response.incomplete" -> {
+                                    receivedTerminalEvent = true
+                                    val responseObject = event["response"] as? JsonObject
+                                    val output = responseObject?.get("output") as? JsonArray
+                                    if (output != null) onExtraContent(responsesMetadata(output))
+                                }
+                                "response.failed", "error" -> {
+                                    receivedTerminalEvent = true
+                                    streamError = responseEventError(event)
+                                        ?: "The Responses API reported a streaming error."
+                                }
+                            }
+                        } else {
+                            val chunk = runCatching {
+                                json.decodeFromString(ChatChunk.serializer(), payload)
+                            }.getOrNull() ?: continue
+                            val choice = chunk.choices.firstOrNull()
+                            choice?.delta?.extraContent?.let(onExtraContent)
+                            choice?.message?.extraContent?.let(onExtraContent)
+                            val delta = choice?.delta?.content
+                            if (!delta.isNullOrEmpty()) emit(delta)
+                        }
                     }
                 } finally {
                     recordReceivedBody(response.status.value, rawStream.toString())
@@ -434,19 +652,31 @@ class LlmClient {
                 if (!response.status.isSuccess()) {
                     throw RuntimeException("HTTP ${response.status.value}: ${rawStream.toString().take(500)}")
                 }
+                if (useResponses) {
+                    if (streamError != null) throw RuntimeException(streamError)
+                    if (!receivedTerminalEvent) {
+                        throw RuntimeException("The Responses stream ended before a completion event was received.")
+                    }
+                }
             } else {
                 val text = response.bodyAsText()
                 recordReceivedBody(response.status.value, text)
                 if (!response.status.isSuccess()) {
                     throw RuntimeException("HTTP ${response.status.value}: ${text.take(500)}")
                 }
-                val parsed = runCatching {
-                    json.decodeFromString(ChatResponse.serializer(), text)
-                }.getOrNull()
-                val message = parsed?.choices?.firstOrNull()?.message
-                message?.extraContent?.let(onExtraContent)
-                val content = message?.content
-                if (!content.isNullOrEmpty()) emit(content)
+                if (useResponses) {
+                    val message = parseResponsesCompletionResponse(text)
+                    message.extraContent?.let(onExtraContent)
+                    if (message.content.isNotEmpty()) emit(message.content)
+                } else {
+                    val parsed = runCatching {
+                        json.decodeFromString(ChatResponse.serializer(), text)
+                    }.getOrNull()
+                    val message = parsed?.choices?.firstOrNull()?.message
+                    message?.extraContent?.let(onExtraContent)
+                    val content = message?.content
+                    if (!content.isNullOrEmpty()) emit(content)
+                }
             }
         }
     }

@@ -28,9 +28,12 @@ The app runs locally on Android and does not require a FPilot backend. You bring
 ## Provider configuration
 
 1. Open **Settings → Providers**.
-2. Add a provider, choose a preset or configure a custom OpenAI-compatible endpoint, and enter your API key.
-3. Fetch available models or enter a model ID manually.
-4. Select the model from the chat screen.
+2. Add a provider, choose a preset or configure a custom endpoint, and enter your API key.
+3. Select the API protocol supported by the endpoint: **Chat Completions** or **Responses**.
+4. Fetch available models or enter a model ID manually.
+5. Select the model from the chat screen.
+
+Use **Responses** for GPT-5.6 Sol and other endpoints that require the Responses API. Existing provider configurations default to Chat Completions so older OpenAI-compatible services keep working. In Responses mode, conversation history replays the original response items, including encrypted reasoning data and function-call outputs. The app does not send the Chat Completions temperature setting in Responses mode; configure a JSON `reasoning` object or another supported parameter in Advanced → Extra body when the selected model/provider requires it.
 
 Examples of compatible base URLs:
 

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,6 +69,10 @@ fun ProviderEditorScreen(
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
     var baseUrl by remember(initial?.id) { mutableStateOf(initial?.baseUrl ?: "") }
     var apiKey by remember(initial?.id) { mutableStateOf(initial?.apiKey ?: "") }
+    var apiProtocol by remember(initial?.id) {
+        mutableStateOf(initial?.apiProtocol ?: com.miniichat.data.ProviderApiProtocol.CHAT_COMPLETIONS)
+    }
+    var apiProtocolMenuOpen by remember(initial?.id) { mutableStateOf(false) }
     var presetBaseUrl by remember(initial?.id) { mutableStateOf("") }
     var headerRows by remember(initial?.id) {
         mutableStateOf<List<Pair<String, String>>>(
@@ -129,7 +135,8 @@ fun ProviderEditorScreen(
                         baseUrl = normalizedUrl,
                         apiKey = apiKey.trim(),
                         customHeaders = headers,
-                        extraBody = body
+                        extraBody = body,
+                        apiProtocol = apiProtocol
                     )
                     onSave(p)
                 }
@@ -164,6 +171,49 @@ fun ProviderEditorScreen(
             }
             FieldSection(stringResource(R.string.setting_api_key)) {
                 EditableValue(apiKey, "", monospace = true) { apiKey = it }
+            }
+            FieldSection("API protocol") {
+                Box(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { apiProtocolMenuOpen = true }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (apiProtocol == com.miniichat.data.ProviderApiProtocol.RESPONSES)
+                                "Responses API" else "Chat Completions API",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = "Choose API protocol",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = apiProtocolMenuOpen,
+                        onDismissRequest = { apiProtocolMenuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Chat Completions API") },
+                            onClick = {
+                                apiProtocol = com.miniichat.data.ProviderApiProtocol.CHAT_COMPLETIONS
+                                apiProtocolMenuOpen = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Responses API") },
+                            onClick = {
+                                apiProtocol = com.miniichat.data.ProviderApiProtocol.RESPONSES
+                                apiProtocolMenuOpen = false
+                            }
+                        )
+                    }
+                }
             }
 
             // Advanced — custom headers + extra body

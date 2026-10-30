@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, agent-fs, request-control-panel, fix/provider-tool-call-compat, agent-fs-reliable-file-reading, build-c-history-md, build-d-history-sidecar, history-session-branch-regenerate, build-d-phase-7-file-access ]
+    branches: [ main, agent-fs, feature/responses-api-support, request-control-panel, fix/provider-tool-call-compat, agent-fs-reliable-file-reading, build-c-history-md, build-d-history-sidecar, history-session-branch-regenerate, build-d-phase-7-file-access ]
   pull_request:
     branches: [ main, agent-fs, request-control-panel, build-c-history-md ]
   workflow_dispatch:
