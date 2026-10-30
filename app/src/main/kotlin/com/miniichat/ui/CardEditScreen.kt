@@ -70,8 +70,6 @@ fun CardEditScreen(
     onRepairMemory: () -> Unit,
     onCreateHistoryTemplate: () -> Unit,
     onOpenFile: (String) -> Unit,
-    sessionFiles: SessionFiles?,
-    onRepairMemory: () -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var draft by remember(card.id) { mutableStateOf(card) }
@@ -279,6 +277,8 @@ private fun MemoryEditor(
     onPickMemoryFile: () -> Unit,
     onCreateTemplate: (String) -> Unit,
     onOpenFile: (String) -> Unit,
+    sessionFiles: SessionFiles?,
+    onRepairMemory: () -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var warning by remember { mutableStateOf<String?>(null) }
