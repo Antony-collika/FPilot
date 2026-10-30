@@ -229,6 +229,21 @@ fun AppRoot(vm: ChatViewModel) {
     val activeConv = conversations.firstOrNull { it.id == activeId }
     var activeSessionFiles by remember { mutableStateOf<SessionFiles?>(null) }
     LaunchedEffect(activeConv?.id, activeConv?.sessionId, activeConv?.sessionStorageUri) { activeSessionFiles = vm.findSessionFiles(activeConv) }
+    val openFile: (String) -> Unit = { raw ->
+        try {
+            val uri = Uri.parse(raw)
+            val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: "text/plain"
+            val edit = Intent(Intent.ACTION_EDIT).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val target = if (edit.resolveActivity(context.packageManager) != null) edit else view
+            if (target.resolveActivity(context.packageManager) == null) error("No installed app can open this file.")
+            context.startActivity(Intent.createChooser(target, "Open file"))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Could not open file: ${e.message ?: "file unavailable"}", Toast.LENGTH_LONG).show()
+        }
+    }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
     val workspaceName = remember(settings.workspaceTreeUri) {
         if (settings.workspaceTreeUri.isBlank()) {
@@ -437,6 +452,7 @@ fun AppRoot(vm: ChatViewModel) {
                             templateCreator.launch("$kind.md")
                         },
                         onOpenHistoryManager = { screen = Screen.HistoryManager },
+                        onOpenFile = openFile,
                         checkMemory = { vm.memoryReferenceWarning() }
                     )
                 }
@@ -451,7 +467,8 @@ fun AppRoot(vm: ChatViewModel) {
                     onDeleteTurn = { id -> vm.deleteTurn(id) },
                     onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
                     onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) },
-                    sessionFiles = activeSessionFiles
+                    sessionFiles = activeSessionFiles,
+                    onOpenFile = openFile
                 )
             }
             Screen.Providers -> {
