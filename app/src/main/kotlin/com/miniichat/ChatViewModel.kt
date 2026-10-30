@@ -268,7 +268,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val historySyncMutex = Mutex()
 
-    /** Read-only lookup for the selected conversation; never creates a session folder or file. */
     /** Lists workspace files with a successful read/create/edit tool result in this chat. */
     suspend fun findWorkingFiles(conversation: Conversation?): List<WorkingFile> {
         if (conversation == null) return emptyList()
@@ -280,17 +279,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     SafFileRepository(getApplication<Application>().contentResolver, android.net.Uri.parse(workspaceUri))
                 }.getOrNull() ?: continue
                 for (call in round.toolCalls) {
-                    if (call.name !in setOf("read_file", "create_file", "edit_file")) continue
                     val path = runCatching {
                         Json.parseToJsonElement(call.arguments).jsonObject["path"]?.jsonPrimitive?.contentOrNull
                     }.getOrNull()?.takeIf { it.isNotBlank() } ?: continue
                     val result = round.results.firstOrNull { it.toolCallId == call.id } ?: continue
-                    val successful = when (call.name) {
-                        "read_file" -> result.content.contains("[FILE_READ status=")
-                        "create_file" -> result.content.startsWith("Created and verified ")
-                        "edit_file" -> result.content.startsWith("Edited and verified ")
-                        else -> false
-                    }
+                    val successful = result.content.contains("[FILE_READ status=") ||
+                        result.content.startsWith("Created and verified ") ||
+                        result.content.startsWith("Edited and verified ")
                     if (!successful) continue
                     val uri = repository.existingFileUri(path) ?: continue
                     discovered[workspaceUri + "|" + path] = WorkingFile(path, uri, call.name, message.id)
@@ -300,6 +295,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return discovered.values.toList()
     }
 
+    /** Read-only lookup for the selected conversation; never creates a session folder or file. */
     suspend fun findSessionFiles(conversation: Conversation?): SessionFiles? {
         val sessionId = conversation?.sessionId ?: return null
         val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return null
