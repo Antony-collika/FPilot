@@ -267,6 +267,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val historySyncMutex = Mutex()
 
+    /** Read-only lookup for the selected conversation; never creates a session folder or file. */
+    suspend fun findSessionFiles(conversation: Conversation?): SessionFiles? {
+        val sessionId = conversation?.sessionId ?: return null
+        val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { fileSessionStore.findSession(storageUri, sessionId) }.getOrNull()
+    }
+
     fun selectConversation(id: String?) {
         _activeId.value = id
         if (id == null || _isStreaming.value) return
