@@ -66,6 +66,34 @@ class FileSessionStore(
             )
         }
 
+    /** Locate a session's existing files without creating missing directories or documents. */
+    override suspend fun findSession(storageTreeUri: String, sessionId: String): SessionFiles? =
+        withContext(Dispatchers.IO) {
+            if (storageTreeUri.isBlank() || !SESSION_ID.matches(sessionId)) return@withContext null
+            val treeUri = Uri.parse(storageTreeUri)
+            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                ?: return@withContext null
+            val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
+            val sessions = listChildren(treeUri, root).firstOrNull {
+                it.isDirectory && it.name == "sessions"
+            } ?: return@withContext null
+            val folder = listChildren(treeUri, DocumentsContract.buildDocumentUriUsingTree(treeUri, sessions.id))
+                .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
+                ?: return@withContext null
+            val folderUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, folder.id)
+            val children = listChildren(treeUri, folderUri).filterNot { it.isDirectory }
+            val history = children.firstOrNull { it.name == "history.md" } ?: return@withContext null
+            val memory = children.firstOrNull { it.name == "memory.md" } ?: return@withContext null
+            val metadata = children.firstOrNull { it.name == "history.meta.json" }
+            SessionFiles(
+                sessionId = sessionId,
+                directoryName = folder.name,
+                historyUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, history.id).toString(),
+                memoryUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, memory.id).toString(),
+                historyMetaUri = metadata?.let { DocumentsContract.buildDocumentUriUsingTree(treeUri, it.id).toString() }
+            )
+        }
+
     /** Remove a newly-created session directory if its branch operation cannot be committed. */
     override suspend fun deleteSession(files: SessionFiles) = withContext(Dispatchers.IO) {
         val historyUri = Uri.parse(files.historyUri)
