@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.miniichat.data.Conversation
 import com.miniichat.data.Message
+import com.miniichat.data.SessionFiles
 
 private class TurnGroup(val user: Message?, val others: List<Message>)
 
@@ -74,7 +75,9 @@ fun HistoryManagerScreen(
     onDeleteMessage: (String) -> Unit,
     onDeleteTurn: (String) -> Unit,
     onDeleteToolRound: (String, Int) -> Unit,
-    onEditToolResult: (String, Int, Int, String, (Boolean) -> Unit) -> Unit
+    onEditToolResult: (String, Int, Int, String, (Boolean) -> Unit) -> Unit,
+    sessionFiles: SessionFiles? = null,
+    onOpenFile: (String) -> Unit = {}
 ) {
     val turns = remember(conversation) { groupTurns(conversation?.messages.orEmpty()) }
     var editing by remember { mutableStateOf<EditRequest?>(null) }
@@ -92,6 +95,61 @@ fun HistoryManagerScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                SectionCard {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Files", style = MaterialTheme.typography.titleMedium)
+                        sessionFiles?.let { files ->
+                            Text("Session files", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("history.md", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { onOpenFile(files.historyUri) }) { Text("Open") }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("memory.md", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { onOpenFile(files.memoryUri) }) { Text("Open") }
+                            }
+                        }
+                        val attachments = conversation?.messages.orEmpty().flatMap { message ->
+                            message.attachments.map { attachment -> Triple(attachment, message, "Attachment") }
+                        }
+                        if (attachments.isNotEmpty()) {
+                            Text("Message attachments", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            attachments.forEach { (attachment, message, _) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(attachment.name.ifBlank { "Unnamed file" }, style = MaterialTheme.typography.bodyMedium)
+                                        Text("Message: ${message.role} · ${message.id.take(8)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    TextButton(onClick = { onOpenFile(attachment.uri) }) { Text("Open") }
+                                }
+                            }
+                        }
+                        val mentionedPaths = conversation?.messages.orEmpty().flatMap { message ->
+                            message.toolRounds.flatMap { round ->
+                                round.results.flatMap { result ->
+                                    Regex("""(?<![A-Za-z0-9_])(?:/[A-Za-z0-9_ .@()+-]+)+\\.[A-Za-z0-9_-]{1,10}""")
+                                        .findAll(result.content).map { match ->
+                                            Triple(match.value, message, result.name)
+                                        }.toList()
+                                }
+                            }
+                        }.distinctBy { it.first to it.second.id }
+                        if (mentionedPaths.isNotEmpty()) {
+                            Text("Paths mentioned in tool results (text only)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            mentionedPaths.forEach { (path, message, toolName) ->
+                                Column {
+                                    Text(path, style = MaterialTheme.typography.bodyMedium)
+                                    Text("$toolName · Message: ${message.id.take(8)} · Path text only; not an accessible file reference", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        if (sessionFiles == null && attachments.isEmpty() && mentionedPaths.isEmpty()) {
+                            Text("No files are associated with this chat.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             item {
                 Text(
                     "Editing or deleting here changes what the model sees from that point on, " +
