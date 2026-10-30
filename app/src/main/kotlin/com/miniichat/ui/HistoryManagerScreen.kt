@@ -128,7 +128,7 @@ fun HistoryManagerScreen(
                         val mentionedPaths = conversation?.messages.orEmpty().flatMap { message ->
                             message.toolRounds.flatMap { round ->
                                 round.results.flatMap { result ->
-                                    Regex("""(?<![A-Za-z0-9_])(?:/[A-Za-z0-9_ .@()+-]+)+\\.[A-Za-z0-9_-]{1,10}""")
+                                    Regex("""(?<![A-Za-z0-9_])(?:/[A-Za-z0-9_ .@()+-]+)+\.[A-Za-z0-9_-]{1,10}""")
                                         .findAll(result.content).map { match ->
                                             Triple(match.value, message, result.name)
                                         }.toList()
