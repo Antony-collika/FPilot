@@ -49,7 +49,7 @@ For Ollama or LM Studio on a physical Android device, use your computer's LAN IP
 
 ## Build
 
-The repository includes a GitHub Actions workflow intended to run unit tests and build debug and release APKs on pushes to `main` and `agent-fs`, and on pull requests targeting `main`.
+The GitHub Actions workflow runs unit tests and builds a release APK on pushes to the configured branches (including `main`, `agent-fs`, and `feature/responses-api-support`) and on pull requests targeting configured base branches, including `agent-fs`.
 
 Requirements for a local build: JDK 17 and Android SDK.
 

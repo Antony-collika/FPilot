@@ -18,6 +18,15 @@ class UsageSummaryTest {
     }
 
     @Test
+    fun readsUsageFromResponsesJsonAndStreamEvents() {
+        val json = """{"type":"response.completed","response":{"usage":{"input_tokens":800,"output_tokens":80,"input_tokens_details":{"cached_tokens":400}}}}"""
+        assertEquals("prompt 800 · cached 400 (50%) · completion 80", summarizeUsage(json))
+
+        val streamed = "data: $json\n\ndata: [DONE]\n"
+        assertEquals("prompt 800 · cached 400 (50%) · completion 80", summarizeUsage(streamed))
+    }
+
+    @Test
     fun returnsNullWhenThereIsNoUsage() {
         assertNull(summarizeUsage("""{"choices":[]}"""))
         assertNull(summarizeUsage("not json"))

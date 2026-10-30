@@ -28,11 +28,15 @@ fun summarizeUsage(body: String): String? {
             runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull()?.let { objects += it }
         }
     }
-    val usage = objects.mapNotNull { it["usage"] as? JsonObject }.lastOrNull() ?: return null
+    val usage = objects.mapNotNull { item ->
+        (item["usage"] as? JsonObject)
+            ?: ((item["response"] as? JsonObject)?.get("usage") as? JsonObject)
+    }.lastOrNull() ?: return null
 
     val prompt = usage.intValue("prompt_tokens") ?: usage.intValue("input_tokens")
     val completion = usage.intValue("completion_tokens") ?: usage.intValue("output_tokens")
-    val cached = (usage["prompt_tokens_details"] as? JsonObject)?.intValue("cached_tokens")
+    val cached = (usage["input_tokens_details"] as? JsonObject)?.intValue("cached_tokens")
+        ?: (usage["prompt_tokens_details"] as? JsonObject)?.intValue("cached_tokens")
         ?: usage.intValue("prompt_cache_hit_tokens")
         ?: usage.intValue("cache_read_input_tokens")
 
