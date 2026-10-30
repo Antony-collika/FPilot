@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.miniichat.ChatViewModel
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.SessionFiles
 import kotlinx.coroutines.launch
 
 private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, CardEdit, HistoryManager }
@@ -226,6 +227,8 @@ fun AppRoot(vm: ChatViewModel) {
     val requestLayout by vm.requestLayout.collectAsState()
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
+    var activeSessionFiles by remember { mutableStateOf<SessionFiles?>(null) }
+    LaunchedEffect(activeConv?.id, activeConv?.sessionId, activeConv?.sessionStorageUri) { activeSessionFiles = vm.findSessionFiles(activeConv) }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
     val workspaceName = remember(settings.workspaceTreeUri) {
         if (settings.workspaceTreeUri.isBlank()) {
@@ -447,7 +450,8 @@ fun AppRoot(vm: ChatViewModel) {
                     onDeleteMessage = { id -> vm.deleteMessage(id) },
                     onDeleteTurn = { id -> vm.deleteTurn(id) },
                     onDeleteToolRound = { id, index -> vm.deleteToolRound(id, index) },
-                    onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) }
+                    onEditToolResult = { id, round, result, text, done -> vm.editToolResult(id, round, result, text, done) },
+                    sessionFiles = activeSessionFiles
                 )
             }
             Screen.Providers -> {
