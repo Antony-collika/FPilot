@@ -387,7 +387,7 @@ fun AppRoot(vm: ChatViewModel) {
                     onOpenProviders = { screen = Screen.Providers },
                     onChooseSystemPromptFile = { systemPromptFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
                     onChooseSkillsFile = { skillsFilePicker.launch(arrayOf("text/*", "application/octet-stream", "application/markdown", "application/x-markdown")) },
-                    onOpenRequestPanel = { screen = Screen.RequestPanel }
+                    onOpenRequestPanel = { requestPanelReturnScreen = Screen.Settings; screen = Screen.RequestPanel }
                 )
             }
             Screen.RequestPanel -> {
