@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.miniichat.data.AppSettings
 import com.miniichat.data.CardRole
 import com.miniichat.data.RequestCard
+import com.miniichat.data.SessionFiles
 import com.miniichat.data.ToolsCardException
 import com.miniichat.data.ToolsCardFormat
 import com.miniichat.data.displayName
@@ -64,7 +65,13 @@ fun CardEditScreen(
     onPickMemoryFile: (String) -> Unit,
     onCreateTemplate: (String) -> Unit,
     onOpenHistoryManager: () -> Unit,
+    sessionFiles: SessionFiles?,
+    onRepairHistory: () -> Unit,
+    onRepairMemory: () -> Unit,
+    onCreateHistoryTemplate: () -> Unit,
     onOpenFile: (String) -> Unit,
+    sessionFiles: SessionFiles?,
+    onRepairMemory: () -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var draft by remember(card.id) { mutableStateOf(card) }
@@ -125,7 +132,7 @@ fun CardEditScreen(
                     onStream = { stream = it }
                 )
                 CardRole.DIRECTORY_TREE -> TreeEditor(draft, hasWorkspace) { draft = it }
-                CardRole.HISTORY -> HistoryEditor(draft, dirty, { draft = it }, onOpenHistoryManager)
+                CardRole.HISTORY -> HistoryEditor(draft, dirty, { draft = it }, onOpenHistoryManager, sessionFiles, onRepairHistory, onCreateHistoryTemplate, onOpenFile)
                 CardRole.MEMORY -> MemoryEditor(
                     card = draft,
                     historyTurnCount = historyTurnCount,
@@ -134,6 +141,8 @@ fun CardEditScreen(
                     onPickMemoryFile = { onPickMemoryFile(card.id) },
                     onCreateTemplate = onCreateTemplate,
                     onOpenFile = onOpenFile,
+                    sessionFiles = sessionFiles,
+                    onRepairMemory = onRepairMemory,
                     checkMemory = checkMemory
                 )
                 CardRole.TOOLS -> ToolsEditor(
@@ -232,7 +241,11 @@ private fun HistoryEditor(
     card: RequestCard,
     dirty: Boolean,
     onChange: (RequestCard) -> Unit,
-    onOpenHistoryManager: () -> Unit
+    onOpenHistoryManager: () -> Unit,
+    sessionFiles: SessionFiles?,
+    onRepairHistory: () -> Unit,
+    onCreateHistoryTemplate: () -> Unit,
+    onOpenFile: (String) -> Unit
 ) {
     SwitchRow(
         title = "Short notes for old tool results",
@@ -248,6 +261,11 @@ private fun HistoryEditor(
         checked = card.turnIdEnabled,
         onCheckedChange = { onChange(card.copy(turnIdEnabled = it)) }
     )
+    sessionFiles?.let { files ->
+        TextButton(onClick = { onOpenFile(files.historyUri) }) { Text("Open history.md") }
+        TextButton(onClick = onRepairHistory) { Text("Repair history.md") }
+        TextButton(onClick = onCreateHistoryTemplate) { Text("Create history.md template") }
+    }
     TextButton(onClick = onOpenHistoryManager, enabled = !dirty) { Text("Manage messages of this chat") }
     if (dirty) Hint("Save your changes first to open the message list.")
 }
@@ -279,6 +297,10 @@ private fun MemoryEditor(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Hint("The app creates this file inside the session folder when the first message is sent. It is read again before every request, so manual edits are respected.")
+        sessionFiles?.let { files ->
+            TextButton(onClick = { onOpenFile(files.memoryUri) }) { Text("Open memory.md") }
+            TextButton(onClick = onRepairMemory) { Text("Repair memory.md") }
+        }
     } else {
         Text(
             card.fileName.ifBlank { "No Memory file selected" },
