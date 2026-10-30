@@ -132,9 +132,6 @@ fun HistoryManagerScreen(
                     }
                 }
             }
-                    }
-                }
-            }
             item {
                 Text(
                     "Editing or deleting here changes what the model sees from that point on, " +
