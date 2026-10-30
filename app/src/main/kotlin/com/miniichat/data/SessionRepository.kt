@@ -38,6 +38,8 @@ data class SessionFiles(
 
 interface SessionFilesRepository {
     suspend fun ensureSession(storageTreeUri: String, sessionId: String, useSidecarForNewSession: Boolean = false): SessionFiles
+    /** Finds existing files only; unlike ensureSession this never creates or repairs anything. */
+    suspend fun findSession(storageTreeUri: String, sessionId: String): SessionFiles?
     suspend fun deleteSession(files: SessionFiles)
     suspend fun readText(uriString: String): String
     suspend fun writeText(uriString: String, text: String)
