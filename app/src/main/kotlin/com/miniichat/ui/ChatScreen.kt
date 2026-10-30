@@ -567,7 +567,7 @@ private fun UserBubble(
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete)) },
+                            text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
                             leadingIcon = {
                                 Icon(
                                     Icons.Default.Delete,
