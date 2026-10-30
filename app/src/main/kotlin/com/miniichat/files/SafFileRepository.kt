@@ -277,6 +277,12 @@ class SafFileRepository(
 
     suspend fun exists(path: String): Boolean = runCatching { resolve(path) }.isSuccess
 
+    /** Returns a content URI only when the relative path resolves to an existing file. */
+    suspend fun existingFileUri(path: String): String? = runCatching {
+        val uri = resolve(path)
+        if (isDirectory(uri)) null else uri.toString()
+    }.getOrNull()
+
     private fun rootDocumentUri(): Uri =
         DocumentsContract.buildDocumentUriUsingTree(
             treeUri,
