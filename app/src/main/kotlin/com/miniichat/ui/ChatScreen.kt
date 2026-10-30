@@ -98,6 +98,7 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onPickModel: () -> Unit,
     onOpenRequestLogs: () -> Unit,
+    onOpenRequestPanel: () -> Unit = {},
     hasFileSession: Boolean = false,
     onRepairHistory: () -> Unit = {},
     onRepairMemory: () -> Unit = {},
@@ -137,6 +138,7 @@ fun ChatScreen(
             onPickModel = onPickModel,
             onNew = onNew,
             onOpenRequestLogs = onOpenRequestLogs,
+            onOpenRequestPanel = onOpenRequestPanel,
             hasFileSession = hasFileSession,
             onRepairHistory = onRepairHistory,
             onRepairMemory = onRepairMemory,
@@ -260,6 +262,7 @@ private fun ChatTopBar(
     onPickModel: () -> Unit,
     onNew: () -> Unit,
     onOpenRequestLogs: () -> Unit,
+    onOpenRequestPanel: () -> Unit,
     hasFileSession: Boolean,
     onRepairHistory: () -> Unit,
     onRepairMemory: () -> Unit,
@@ -289,6 +292,10 @@ private fun ChatTopBar(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+            IconButton(onClick = onOpenRequestPanel) {
+                Icon(Icons.Default.Build, contentDescription = "Request Control Panel",
+                    tint = MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = onOpenRequestLogs) {
                 Icon(Icons.Default.Article, contentDescription = "LLM request logs",
                     tint = MaterialTheme.colorScheme.onSurface)
