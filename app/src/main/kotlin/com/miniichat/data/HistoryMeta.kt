@@ -71,15 +71,18 @@ object HistoryMeta {
                 it.file == "history_${it.id}.md"
         }) { "Metadata contains an invalid branch ID or file name." }
         val ids = normalizedBranches.map { it.id }.toSet()
-        require(normalizedBranches.all { it.parentBranchId == null || it.parentBranchId in ids }) {
-            "Metadata references a missing parent branch."
+        // A branch file can be deleted or renamed outside the app. A stale parent link must
+        // not invalidate the entire sidecar; reconciliation will keep surviving branches
+        // and remove the missing relationship while preserving their Markdown content.
+        val branchesWithValidParents = normalizedBranches.map { branch ->
+            branch.copy(parentBranchId = branch.parentBranchId?.takeIf { it in ids })
         }
         val active = document.activeBranchId.takeIf { it in ids } ?: normalizedBranches.first().id
         val maxNumber = normalizedBranches.mapNotNull { it.id.removePrefix("branch_").toIntOrNull() }.maxOrNull() ?: 1
         return document.copy(
             version = 2,
             activeBranchId = active,
-            branches = normalizedBranches.sortedBy { it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE },
+            branches = branchesWithValidParents.sortedBy { it.id.removePrefix("branch_").toIntOrNull() ?: Int.MAX_VALUE },
             nextBranchNumber = maxOf(document.nextBranchNumber, maxNumber + 1, 2)
         )
     }

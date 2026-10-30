@@ -232,6 +232,36 @@ broken
     }
 
     @Test
+    fun staleParentReferenceDoesNotInvalidateSurvivingBranchMetadata() {
+        val document = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Surviving branch",
+            createdAt = 1_761_300_000_000L,
+            nextTurn = 1,
+            branchId = "branch_02",
+            messages = emptyList()
+        )
+        val metadata = HistoryMeta.renderForBranch(
+            previousText = "",
+            document = document,
+            activeBranchId = "branch_02",
+            branches = listOf(
+                HistoryBranchMetadata(
+                    id = "branch_02",
+                    file = "history_branch_02.md",
+                    parentBranchId = "branch_01",
+                    createdAt = 2
+                )
+            ),
+            nextBranchNumber = 3
+        )
+
+        val parsed = HistoryMeta.parse(metadata, document.sessionId)
+        assertEquals("branch_02", parsed.activeBranchId)
+        assertNull(parsed.branches.single().parentBranchId)
+    }
+
+    @Test
     fun metadataRepairKeepsBranchInventoryWhenMarkdownIsCorrupt() {
         val source = HistoryDocument(
             sessionId = "a3f9c1d2",
