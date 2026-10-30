@@ -184,6 +184,7 @@ fun AppRoot(vm: ChatViewModel) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var screen by rememberSaveable { mutableStateOf(Screen.Chat) }
+    var requestPanelReturnScreen by remember { mutableStateOf(Screen.Settings) }
     var showModelPicker by rememberSaveable { mutableStateOf(false) }
     var editingProvider by remember { mutableStateOf<ProviderConfig?>(null) }
 
@@ -228,7 +229,6 @@ fun AppRoot(vm: ChatViewModel) {
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     var activeSessionFiles by remember { mutableStateOf<SessionFiles?>(null) }
-    var requestPanelReturnScreen by remember { mutableStateOf(Screen.Settings) }
     LaunchedEffect(activeConv?.id, activeConv?.sessionId, activeConv?.sessionStorageUri) { activeSessionFiles = vm.findSessionFiles(activeConv) }
     val openFile: (String) -> Unit = { raw ->
         try {
