@@ -53,6 +53,14 @@ data class ToolRound(
     @SerialName("workspace_uri") val workspaceUri: String? = null
 )
 
+/** A real file the model accessed in the workspace during a conversation. */
+data class WorkingFile(
+    val path: String,
+    val uri: String,
+    val operation: String,
+    val messageId: String
+)
+
 @Serializable
 data class Message(
     val id: String,
