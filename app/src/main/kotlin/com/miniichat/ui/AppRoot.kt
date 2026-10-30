@@ -200,7 +200,7 @@ fun AppRoot(vm: ChatViewModel) {
         screen = Screen.Settings
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.RequestPanel) {
-        screen = Screen.Settings
+        screen = requestPanelReturnScreen
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.HistoryManager) {
         screen = Screen.RequestPanel
@@ -228,6 +228,7 @@ fun AppRoot(vm: ChatViewModel) {
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     var activeSessionFiles by remember { mutableStateOf<SessionFiles?>(null) }
+    var requestPanelReturnScreen by remember { mutableStateOf(Screen.Settings) }
     LaunchedEffect(activeConv?.id, activeConv?.sessionId, activeConv?.sessionStorageUri) { activeSessionFiles = vm.findSessionFiles(activeConv) }
     val openFile: (String) -> Unit = { raw ->
         try {
@@ -355,7 +356,7 @@ fun AppRoot(vm: ChatViewModel) {
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenRequestLogs = { screen = Screen.RequestLogs },
-                        onOpenRequestPanel = { screen = Screen.RequestPanel },
+                        onOpenRequestPanel = { requestPanelReturnScreen = Screen.Chat; screen = Screen.RequestPanel },
                         hasFileSession = activeConv?.sessionId != null,
                         onRepairHistory = { vm.repairActiveHistory() },
                         onRepairMemory = { vm.repairActiveMemory() },
@@ -396,7 +397,7 @@ fun AppRoot(vm: ChatViewModel) {
                     hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
                     historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,
                     historyRevision = activeConv?.messages?.hashCode() ?: 0,
-                    onBack = { screen = Screen.Settings },
+                    onBack = { screen = requestPanelReturnScreen },
                     onLayoutChange = { vm.saveLayout(it) },
                     onAddCard = { newLayout, newCard ->
                         pendingNewCard = newCard
