@@ -331,6 +331,8 @@ fun AppRoot(vm: ChatViewModel) {
                         onRegenerateFrom = { msgId -> vm.regenerateFrom(msgId) },
                         onDeleteMessage = { msgId -> vm.deleteMessage(msgId) },
                         onEditMessage = { msgId, newText -> vm.editMessage(msgId, newText) },
+                        onEditAndRegenerateMessage = { msgId, newText -> vm.editAndRegenerateFrom(msgId, newText) },
+                        onBranchFromHere = { msgId -> vm.branchFromHere(msgId) },
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenRequestLogs = { screen = Screen.RequestLogs },

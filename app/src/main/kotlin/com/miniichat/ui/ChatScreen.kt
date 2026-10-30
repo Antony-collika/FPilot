@@ -92,6 +92,8 @@ fun ChatScreen(
     onRegenerateFrom: (String) -> Unit = {},
     onDeleteMessage: (String) -> Unit = {},
     onEditMessage: (String, String) -> Unit = { _, _ -> },
+    onEditAndRegenerateMessage: (String, String) -> Unit = { _, _ -> },
+    onBranchFromHere: (String) -> Unit = {},
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
     onPickModel: () -> Unit,
@@ -114,6 +116,7 @@ fun ChatScreen(
     }
     var editingMessageId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingDraft by rememberSaveable { mutableStateOf("") }
+    var editingAndRegenerating by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(messages.size, isStreaming) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
@@ -164,23 +167,34 @@ fun ChatScreen(
                         editing = editingMessageId == msg.id,
                         editingDraft = if (editingMessageId == msg.id) editingDraft else "",
                         onEditingDraftChange = { editingDraft = it },
+                        editingAndRegenerating = editingAndRegenerating && editingMessageId == msg.id,
                         onStartEdit = {
                             editingMessageId = msg.id
                             editingDraft = msg.content
+                            editingAndRegenerating = false
+                        },
+                        onStartEditAndRegenerate = {
+                            editingMessageId = msg.id
+                            editingDraft = msg.content
+                            editingAndRegenerating = true
                         },
                         onCommitEdit = {
                             editingMessageId?.let { id ->
-                                onEditMessage(id, editingDraft)
+                                if (editingAndRegenerating) onEditAndRegenerateMessage(id, editingDraft)
+                                else onEditMessage(id, editingDraft)
                             }
                             editingMessageId = null
                             editingDraft = ""
+                            editingAndRegenerating = false
                         },
                         onCancelEdit = {
                             editingMessageId = null
                             editingDraft = ""
+                            editingAndRegenerating = false
                         },
                         onDelete = { onDeleteMessage(msg.id) },
-                        onRegenerateFrom = { onRegenerateFrom(msg.id) }
+                        onRegenerateFrom = { onRegenerateFrom(msg.id) },
+                        onBranchFromHere = { onBranchFromHere(msg.id) }
                     )
                 }
             }
@@ -357,12 +371,15 @@ private fun MessageItem(
     isStreaming: Boolean,
     editing: Boolean = false,
     editingDraft: String = "",
+    editingAndRegenerating: Boolean = false,
     onEditingDraftChange: (String) -> Unit = {},
     onStartEdit: () -> Unit = {},
+    onStartEditAndRegenerate: () -> Unit = {},
     onCommitEdit: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     onDelete: () -> Unit = {},
-    onRegenerateFrom: () -> Unit = {}
+    onRegenerateFrom: () -> Unit = {},
+    onBranchFromHere: () -> Unit = {}
 ) {
     val isUser = message.role == "user"
     if (isUser) {
@@ -370,12 +387,15 @@ private fun MessageItem(
             message = message,
             editing = editing,
             editingDraft = editingDraft,
+            editingAndRegenerating = editingAndRegenerating,
             onEditingDraftChange = onEditingDraftChange,
             onStartEdit = onStartEdit,
+            onStartEditAndRegenerate = onStartEditAndRegenerate,
             onCommitEdit = onCommitEdit,
             onCancelEdit = onCancelEdit,
             onDelete = onDelete,
-            onRegenerateFrom = onRegenerateFrom
+            onRegenerateFrom = onRegenerateFrom,
+            onBranchFromHere = onBranchFromHere
         )
     } else {
         AssistantRow(
@@ -394,12 +414,15 @@ private fun UserBubble(
     message: Message,
     editing: Boolean,
     editingDraft: String,
+    editingAndRegenerating: Boolean,
     onEditingDraftChange: (String) -> Unit,
     onStartEdit: () -> Unit,
+    onStartEditAndRegenerate: () -> Unit,
     onCommitEdit: () -> Unit,
     onCancelEdit: () -> Unit,
     onDelete: () -> Unit,
-    onRegenerateFrom: () -> Unit
+    onRegenerateFrom: () -> Unit,
+    onBranchFromHere: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
@@ -481,7 +504,7 @@ private fun UserBubble(
                         }
                         Spacer(Modifier.width(4.dp))
                         androidx.compose.material3.TextButton(onClick = onCommitEdit) {
-                            Text(stringResource(R.string.save))
+                            Text(if (editingAndRegenerating) stringResource(R.string.save_and_regenerate) else stringResource(R.string.save))
                         }
                     }
                 }
@@ -533,11 +556,26 @@ private fun UserBubble(
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(stringResource(R.string.edit_regenerate_from_here)) },
+                            leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                            onClick = {
+                                menuOpen = false
+                                onStartEditAndRegenerate()
+                            }
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
                             text = { Text(stringResource(R.string.regenerate_from_here)) },
                             leadingIcon = { Icon(Icons.Default.Refresh, null) },
                             onClick = {
                                 menuOpen = false
                                 onRegenerateFrom()
+                            }
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(stringResource(R.string.branch_from_here)) },
+                            onClick = {
+                                menuOpen = false
+                                onBranchFromHere()
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(

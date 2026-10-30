@@ -585,7 +585,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendMessage(text: String, attachments: List<com.miniichat.data.Attachment> = emptyList()) {
+    fun sendMessage(text: String, attachments: List<com.miniichat.data.Attachment> = emptyList()) =
+        sendMessageInternal(text, attachments)
+
+    /** Sends a turn, optionally rebuilding from a preserved prefix until the new answer commits. */
+    private fun sendMessageInternal(
+        text: String,
+        attachments: List<com.miniichat.data.Attachment>,
+        historyOverride: Conversation? = null,
+        userMessageOverride: Message? = null,
+        restoreOnFailure: Conversation? = null
+    ) {
         // Reject re-entrant sends while a stream is in flight (debounce double-tap)
         if (_isStreaming.value || streamingJob?.isActive == true) return
         val trimmed = text.trim()
@@ -615,15 +625,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val temperature = current.temperature
 
         viewModelScope.launch {
-            val activeId = _activeId.value ?: newId().also { _activeId.value = it }
-            val existing = store.snapshot().firstOrNull { it.id == activeId }
+            val activeId = historyOverride?.id ?: _activeId.value ?: newId().also { _activeId.value = it }
+            val existing = historyOverride ?: store.snapshot().firstOrNull { it.id == activeId }
             val baseTitle = trimmed.take(30).replace("\n", " ")
             val requestedLayout = effectiveLayout()
 
             // New chats get a session ID only when Storage is configured. Existing chats without
             // a session ID stay in the legacy DataStore path; their history is not migrated.
             val sessionId = existing?.sessionId ?: if (
-                current.storageTreeUri.isNotBlank() && (existing == null || existing.messages.isEmpty())
+                historyOverride == null && current.storageTreeUri.isNotBlank() && (existing == null || existing.messages.isEmpty())
             ) {
                 FileSessionStore.newSessionId()
             } else {
@@ -652,16 +662,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val rawHistory = fileSessionStore.readText(sessionFiles.historyUri)
                     historyDocument = fileSessionStore.readHistory(sessionFiles, existing?.title ?: baseTitle)
-                    // Build B created empty history.md files before transcript persistence existed.
-                    // Seed only a truly empty file from that same session's existing DataStore cache.
-                    if (rawHistory.isBlank() && !existing?.messages.isNullOrEmpty()) {
+                    // Seed a genuinely blank legacy file from the complete pre-operation cache.
+                    val cacheSource = restoreOnFailure ?: existing
+                    if (rawHistory.isBlank() && !cacheSource?.messages.isNullOrEmpty()) {
                         historyDocument = historyDocument!!.copy(
-                            title = existing!!.title,
-                            createdAt = existing.createdAt,
-                            nextTurn = maxOf(existing.nextTurnNo, (existing.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
-                            messages = HistoryMd.completedMessages(existing.messages)
+                            title = cacheSource!!.title,
+                            createdAt = cacheSource.createdAt,
+                            nextTurn = maxOf(cacheSource.nextTurnNo, (cacheSource.messages.mapNotNull { it.turnNo }.maxOrNull() ?: 0) + 1),
+                            messages = HistoryMd.completedMessages(cacheSource.messages)
                         )
                         fileSessionStore.writeHistory(sessionFiles, historyDocument!!)
+                    }
+                    // Use the selected prefix for regeneration, but leave the complete file untouched
+                    // until the replacement answer has completed successfully.
+                    if (historyOverride != null) {
+                        historyDocument = HistoryDocument(
+                            sessionId = sessionId,
+                            title = historyOverride.title,
+                            createdAt = historyOverride.createdAt,
+                            nextTurn = historyOverride.nextTurnNo,
+                            messages = historyOverride.messages
+                        )
                     }
                 } catch (e: HistoryFormatException) {
                     _error.value = "History file has a problem: " + e.message + " Repair history.md before sending."
@@ -695,9 +716,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     sessionStorageUri = sessionStorageUri ?: existing?.sessionStorageUri
                 )
                 .withTurnNumbers()
-            val turnNo = baseConversation.nextTurnNo
+            val turnNo = userMessageOverride?.turnNo ?: baseConversation.nextTurnNo
 
-            val userMsg = Message(
+            val userMsg = userMessageOverride ?: Message(
                 id = newId(),
                 role = "user",
                 content = trimmed,
@@ -850,51 +871,72 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     throw cancelled
                 } catch (e: Exception) {
                     _error.value = e.message ?: "Request failed"
-                    if (sessionFiles == null) {
+                    if (sessionFiles == null && historyOverride == null) {
                         if (builder.isEmpty()) builder.append("(error: ${e.message ?: "Request failed"})")
                         appendAssistant(activeId, assistantId, builder.toString())
                     }
                 } finally {
                     if (sessionFiles == null) {
-                        if (builder.isNotEmpty()) {
+                        if (historyOverride != null && !turnSucceeded) {
+                            store.upsert(restoreOnFailure ?: baseConversation)
+                        } else if (builder.isNotEmpty()) {
                             appendAssistant(activeId, assistantId, shown(builder.toString()), streamExtraContent)
                         }
                     } else {
                         try {
                             if (turnSucceeded) {
-                                // Re-read immediately before writing so edits made during the request survive.
-                                val latest = fileSessionStore.readHistory(sessionFiles, baseTitle)
-                                val persistedTurn = maxOf(turnNo, latest.nextTurn)
-                                val persistedUser = userMsg.copy(turnNo = persistedTurn)
-                                val finalAssistant = Message(
-                                    id = assistantId,
-                                    role = "assistant",
-                                    content = shown(builder.toString()),
-                                    createdAt = System.currentTimeMillis(),
-                                    extraContent = finalExtraContent,
-                                    toolRounds = finalToolRounds
-                                )
-                                val combined = latest.messages + persistedUser + finalAssistant
-                                val document = latest.copy(
-                                    title = if (latest.messages.isEmpty()) baseTitle else latest.title,
-                                    nextTurn = persistedTurn + 1,
-                                    messages = combined
-                                )
-                                fileSessionStore.writeHistory(sessionFiles, document)
-                                val persistedConversation = baseConversation.copy(
-                                    title = document.title,
-                                    messages = combined,
-                                    nextTurnNo = document.nextTurn,
-                                    updatedAt = System.currentTimeMillis()
-                                )
-                                store.upsert(persistedConversation)
+                                // Re-read before committing. If an external Edit context changed the
+                                // transcript during regeneration, keep that edit and do not overwrite it.
+                                val diskLatest = fileSessionStore.readHistory(sessionFiles, baseTitle)
+                                val externalEditDuringRegeneration = historyOverride != null && restoreOnFailure != null && (
+                                    diskLatest.messages != restoreOnFailure.messages ||
+                                        diskLatest.title != restoreOnFailure.title ||
+                                        diskLatest.createdAt != restoreOnFailure.createdAt ||
+                                        diskLatest.nextTurn != restoreOnFailure.nextTurnNo
+                                    )
+                                if (externalEditDuringRegeneration) {
+                                    store.upsert(restoreOnFailure!!.copy(
+                                        title = diskLatest.title,
+                                        messages = diskLatest.messages,
+                                        createdAt = diskLatest.createdAt,
+                                        nextTurnNo = diskLatest.nextTurn,
+                                        updatedAt = System.currentTimeMillis()
+                                    ))
+                                    _error.value = "History changed outside the app while regenerating. The external edit was kept; retry the operation."
+                                } else {
+                                    val latest = if (historyOverride != null) historyDocument!! else diskLatest
+                                    val persistedTurn = if (userMessageOverride != null) turnNo else maxOf(turnNo, latest.nextTurn)
+                                    val persistedUser = userMsg.copy(turnNo = persistedTurn)
+                                    val finalAssistant = Message(
+                                        id = assistantId,
+                                        role = "assistant",
+                                        content = shown(builder.toString()),
+                                        createdAt = System.currentTimeMillis(),
+                                        extraContent = finalExtraContent,
+                                        toolRounds = finalToolRounds
+                                    )
+                                    val combined = latest.messages + persistedUser + finalAssistant
+                                    val document = latest.copy(
+                                        title = if (latest.messages.isEmpty()) baseTitle else latest.title,
+                                        nextTurn = persistedTurn + 1,
+                                        messages = combined
+                                    )
+                                    fileSessionStore.writeHistory(sessionFiles, document)
+                                    val persistedConversation = baseConversation.copy(
+                                        title = document.title,
+                                        messages = combined,
+                                        nextTurnNo = document.nextTurn,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                    store.upsert(persistedConversation)
+                                }
                             } else {
                                 // Failed or cancelled turns are never committed to history.
-                                store.upsert(baseConversation)
+                                store.upsert(restoreOnFailure ?: baseConversation)
                             }
                         } catch (e: Exception) {
                             _error.value = "The reply completed, but history.md could not be saved: " + (e.message ?: "unknown error")
-                            store.upsert(baseConversation)
+                            store.upsert(restoreOnFailure ?: baseConversation)
                         }
                     }
                     _streamingOverlay.value = null
@@ -926,34 +968,102 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun regenerate() {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
+            if (!historySyncMutex.withLock { syncHistoryFromFileLocked(convId) }) return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val msgs = conv.messages
-            val lastUserIdx = msgs.indexOfLast { it.role == "user" }
-            if (lastUserIdx < 0) return@launch
-            val lastUser = msgs[lastUserIdx]
-            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
-            val trimmed = msgs.subList(0, lastUserIdx)
-            store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
-            sendMessage(lastUser.content, lastUser.attachments)
+            val index = conv.messages.indexOfLast { it.role == "user" }
+            if (index < 0) return@launch
+            val target = conv.messages[index]
+            val prefix = conv.copy(messages = conv.messages.take(index), nextTurnNo = target.turnNo ?: conv.nextTurnNo)
+            sendMessageInternal(target.content, target.attachments, prefix, target, conv)
         }
     }
 
-    /** Branch from a specific user message — drops everything after it and re-sends. */
+    /** Regenerates from a selected user turn; the original transcript remains intact on failure. */
     fun regenerateFrom(messageId: String) {
+        if (isBusy()) return
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
+            if (!historySyncMutex.withLock { syncHistoryFromFileLocked(convId) }) return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
-            val msgs = conv.messages
-            val idx = msgs.indexOfFirst { it.id == messageId }
-            if (idx < 0) return@launch
-            val target = msgs[idx]
+            val index = conv.messages.indexOfFirst { it.id == messageId }
+            if (index < 0) return@launch
+            val target = conv.messages[index]
             if (target.role != "user") return@launch
-            // Cut BEFORE the user message: sendMessage adds it again, so it must not stay here.
-            val trimmed = msgs.subList(0, idx)
-            store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
-            sendMessage(target.content, target.attachments)
+            val prefix = conv.copy(messages = conv.messages.take(index), nextTurnNo = target.turnNo ?: conv.nextTurnNo)
+            sendMessageInternal(target.content, target.attachments, prefix, target, conv)
+        }
+    }
+
+    /** Edits the selected user turn and regenerates its answer as one history operation. */
+    fun editAndRegenerateFrom(messageId: String, newContent: String) {
+        if (isBusy()) return
+        viewModelScope.launch {
+            val convId = _activeId.value ?: return@launch
+            if (!historySyncMutex.withLock { syncHistoryFromFileLocked(convId) }) return@launch
+            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
+            val index = conv.messages.indexOfFirst { it.id == messageId }
+            if (index < 0) return@launch
+            val target = conv.messages[index]
+            if (target.role != "user") return@launch
+            val edited = target.copy(content = newContent.trim())
+            val prefix = conv.copy(messages = conv.messages.take(index), nextTurnNo = target.turnNo ?: conv.nextTurnNo)
+            sendMessageInternal(edited.content, edited.attachments, prefix, edited, conv)
+        }
+    }
+
+    /** Creates an independent linear session containing the selected user turn and its prefix. */
+    fun branchFromHere(messageId: String) {
+        if (isBusy()) return
+        val activeId = _activeId.value ?: return
+        viewModelScope.launch {
+            historySyncMutex.withLock {
+                if (!syncHistoryFromFileLocked(activeId)) return@withLock
+                val source = store.snapshot().firstOrNull { it.id == activeId } ?: return@withLock
+                val start = source.messages.indexOfFirst { it.id == messageId }
+                if (start < 0 || source.messages[start].role != "user") return@withLock
+                val end = (start + 1 until source.messages.size)
+                    .firstOrNull { source.messages[it].role == "user" } ?: source.messages.size
+                val selectedMessages = source.messages.take(end)
+                val storageUri = source.sessionStorageUri?.takeIf { it.isNotBlank() }
+                    ?: settings.value.storageTreeUri.takeIf { it.isNotBlank() }
+                if (storageUri.isNullOrBlank()) {
+                    _error.value = "Choose a Storage folder before creating a branched session."
+                    return@withLock
+                }
+                var newFiles: SessionFiles? = null
+                try {
+                    val newSessionId = FileSessionStore.newSessionId()
+                    val createdFiles = fileSessionStore.ensureSession(storageUri, newSessionId, useSidecarForNewSession = true)
+                    newFiles = createdFiles
+                    check(createdFiles.historyMetaUri != null) { "The new session could not initialize history.meta.json." }
+                    val nextTurn = (selectedMessages.filter { it.role == "user" }
+                        .mapNotNull { it.turnNo }.maxOrNull() ?: source.messages[start].turnNo ?: 0) + 1
+                    val document = HistoryDocument(newSessionId, source.title, source.createdAt, nextTurn, selectedMessages)
+                    fileSessionStore.writeHistory(createdFiles, document)
+                    val verified = fileSessionStore.readHistory(createdFiles, source.title)
+                    check(verified.messages == selectedMessages) { "The new session history did not verify after writing." }
+                    val branched = Conversation(
+                        id = newId(), title = source.title, messages = verified.messages,
+                        createdAt = source.createdAt, updatedAt = System.currentTimeMillis(),
+                        nextTurnNo = verified.nextTurn, sessionId = newSessionId, sessionStorageUri = storageUri
+                    )
+                    store.upsert(branched)
+                    _activeId.value = branched.id
+                    _toast.value = "Created a new session from T" + (source.messages[start].turnNo ?: "?")
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    newFiles?.let { runCatching { fileSessionStore.deleteSession(it) } }
+                    throw cancelled
+                } catch (e: Exception) {
+                    newFiles?.let { files ->
+                        runCatching { fileSessionStore.deleteSession(files) }
+                            .exceptionOrNull()?.let { e.addSuppressed(it) }
+                    }
+                    _error.value = "Could not create the branched session: " + (e.message ?: "unknown error")
+                }
+            }
         }
     }
 

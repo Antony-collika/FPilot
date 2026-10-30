@@ -95,4 +95,7 @@
     <string name="edit">Edit</string>
     <string name="regenerate_from_here">Regenerate from here</string>
     <string name="advanced_options">Advanced</string>
+    <string name="edit_regenerate_from_here">Edit &amp; Regenerate from here</string>
+    <string name="branch_from_here">Branch from here</string>
+    <string name="save_and_regenerate">Save &amp; regenerate</string>
 </resources>

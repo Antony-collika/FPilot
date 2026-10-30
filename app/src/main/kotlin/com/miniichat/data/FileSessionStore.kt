@@ -35,6 +35,9 @@ class FileSessionStore(
             val sessions = findOrCreateDirectory(treeUri, root, "sessions")
             val existing = listChildren(treeUri, sessions)
                 .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
+            if (existing != null && useSidecarForNewSession) {
+                throw IOException("A session with this ID already exists.")
+            }
             val isNewSessionFolder = existing == null
             val folder = if (existing != null) {
                 DocumentsContract.buildDocumentUriUsingTree(treeUri, existing.id)
@@ -62,6 +65,24 @@ class FileSessionStore(
                 historyMetaUri = metadata?.toString()
             )
         }
+
+    /** Remove a newly-created session directory if its branch operation cannot be committed. */
+    override suspend fun deleteSession(files: SessionFiles) = withContext(Dispatchers.IO) {
+        val historyUri = Uri.parse(files.historyUri)
+        val documentId = DocumentsContract.getDocumentId(historyUri)
+        val parentId = documentId.substringBeforeLast('/', "")
+        if (parentId.isBlank()) throw IOException("Could not locate the session folder for cleanup.")
+        val folder = DocumentsContract.buildDocumentUriUsingTree(historyUri, parentId)
+        listChildren(historyUri, folder).forEach { child ->
+            val childUri = DocumentsContract.buildDocumentUriUsingTree(historyUri, child.id)
+            if (!DocumentsContract.deleteDocument(resolver, childUri)) {
+                throw IOException("Could not remove the incomplete session file ${child.name}.")
+            }
+        }
+        if (!DocumentsContract.deleteDocument(resolver, folder)) {
+            throw IOException("Could not remove the incomplete session folder.")
+        }
+    }
 
     /** Read a session Markdown file using the persisted Storage Access Framework URI. */
     override suspend fun readText(uriString: String): String = withContext(Dispatchers.IO) {

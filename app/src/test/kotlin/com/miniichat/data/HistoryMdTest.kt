@@ -223,4 +223,31 @@ broken
         assertEquals(listOf("u1"), repaired.messages.map { it.id })
         assertTrue(repaired.repairNotes.isNotEmpty())
     }
+    @Test
+    fun branchSidecarUsesNewSessionIdAndPreservesSelectedMessageMetadata() {
+        val round = ToolRound(
+            content = "tool output",
+            toolCalls = listOf(StoredToolCall("call_1", "read_file", """{"path":"notes.md"}""")),
+            results = listOf(StoredToolResult("call_1", "read_file", "result"))
+        )
+        val original = HistoryDocument(
+            sessionId = "a3f9c1d2", title = "Original", createdAt = 100, nextTurn = 3,
+            messages = listOf(
+                Message("u1", "user", "question", attachments = listOf(Attachment("file", "content://x", "text/plain", "x.txt")), createdAt = 11, turnNo = 1),
+                Message("a1", "assistant", "answer", createdAt = 12, extraContent = buildJsonObject { put("trace", "yes") }, toolRounds = listOf(round))
+            )
+        )
+        val branched = original.copy(sessionId = "b4e2d8a1")
+        val markdown = HistoryMd.render(branched, sidecarFormat = true)
+        val metadata = HistoryMeta.render(branched)
+        val parsed = HistoryMd.parse(markdown, branched.sessionId, branched.title, metadata)
+        val sidecar = HistoryMeta.parse(metadata, branched.sessionId)
+
+        assertEquals(original.messages, parsed.messages)
+        assertEquals(original.messages.map { it.id }.toSet(), sidecar.messages.keys)
+        assertEquals(original.messages[0].attachments, sidecar.messages["u1"]?.attachments)
+        assertEquals(round, sidecar.messages["a1"]?.toolRounds?.single())
+        assertEquals("b4e2d8a1", sidecar.session)
+        assertFalse(metadata.contains(original.sessionId))
+    }
 }
