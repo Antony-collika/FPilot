@@ -64,6 +64,7 @@ fun CardEditScreen(
     onPickMemoryFile: (String) -> Unit,
     onCreateTemplate: (String) -> Unit,
     onOpenHistoryManager: () -> Unit,
+    onOpenFile: (String) -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var draft by remember(card.id) { mutableStateOf(card) }
@@ -132,6 +133,7 @@ fun CardEditScreen(
                     onChange = { draft = it },
                     onPickMemoryFile = { onPickMemoryFile(card.id) },
                     onCreateTemplate = onCreateTemplate,
+                    onOpenFile = onOpenFile,
                     checkMemory = checkMemory
                 )
                 CardRole.TOOLS -> ToolsEditor(
@@ -139,13 +141,15 @@ fun CardEditScreen(
                     hasWorkspace = hasWorkspace,
                     onChange = { draft = it },
                     onPickFile = { onPickFile(card.id) },
-                    onCreateTemplate = onCreateTemplate
+                    onCreateTemplate = onCreateTemplate,
+                    onOpenFile = onOpenFile
                 )
                 else -> TextEditor(
                     card = draft,
                     onChange = { draft = it },
                     onPickFile = { onPickFile(card.id) },
-                    onCreateTemplate = onCreateTemplate
+                    onCreateTemplate = onCreateTemplate,
+                    onOpenFile = onOpenFile
                 )
             }
         }
@@ -256,6 +260,7 @@ private fun MemoryEditor(
     onChange: (RequestCard) -> Unit,
     onPickMemoryFile: () -> Unit,
     onCreateTemplate: (String) -> Unit,
+    onOpenFile: (String) -> Unit,
     checkMemory: suspend () -> String?
 ) {
     var warning by remember { mutableStateOf<String?>(null) }
@@ -283,6 +288,7 @@ private fun MemoryEditor(
         TextButton(onClick = onPickMemoryFile) {
             Text(if (card.fileUri.isBlank()) "Choose Memory file" else "Change Memory file")
         }
+        if (card.fileUri.isNotBlank()) TextButton(onClick = { onOpenFile(card.fileUri) }) { Text("Open file") }
         TextButton(onClick = { onCreateTemplate("memory") }) { Text("Create a template file") }
         Hint("The model updates this file itself at the end of its answers. You can edit the file by hand between messages.")
     }
@@ -295,7 +301,8 @@ private fun ToolsEditor(
     hasWorkspace: Boolean,
     onChange: (RequestCard) -> Unit,
     onPickFile: () -> Unit,
-    onCreateTemplate: (String) -> Unit
+    onCreateTemplate: (String) -> Unit,
+    onOpenFile: (String) -> Unit
 ) {
     var message by remember { mutableStateOf<String?>(null) }
     Hint("This card is not a message: it is the tool list sent with the request, so its position in the panel changes nothing. " +
@@ -343,6 +350,7 @@ private fun ToolsEditor(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         TextButton(onClick = onPickFile) { Text(if (card.fileUri.isBlank()) "Choose file" else "Change file") }
+        if (card.fileUri.isNotBlank()) TextButton(onClick = { onOpenFile(card.fileUri) }) { Text("Open file") }
         TextButton(onClick = { onCreateTemplate("tools") }) { Text("Create a template file") }
         Hint("The file is read again every time you send a message.")
     }
@@ -353,7 +361,8 @@ private fun TextEditor(
     card: RequestCard,
     onChange: (RequestCard) -> Unit,
     onPickFile: () -> Unit,
-    onCreateTemplate: (String) -> Unit
+    onCreateTemplate: (String) -> Unit,
+    onOpenFile: (String) -> Unit
 ) {
     UnderlinedField(
         value = card.title,
@@ -385,6 +394,7 @@ private fun TextEditor(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         TextButton(onClick = onPickFile) { Text(if (card.fileUri.isBlank()) "Choose file" else "Change file") }
+        if (card.fileUri.isNotBlank()) TextButton(onClick = { onOpenFile(card.fileUri) }) { Text("Open file") }
         TextButton(onClick = { onCreateTemplate("system") }) { Text("Create a template file") }
         Hint("The file is read again every time you send a message.")
     }
