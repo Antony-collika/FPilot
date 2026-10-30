@@ -39,6 +39,7 @@ import com.miniichat.data.withContent
 import com.miniichat.data.RequestLayout
 import com.miniichat.data.RequestLayoutStore
 import com.miniichat.data.ToolRound
+import com.miniichat.data.WorkingFile
 import com.miniichat.data.buildToolRounds
 import com.miniichat.data.defaultLayout
 import com.miniichat.data.layoutFromSettings
@@ -268,6 +269,37 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val historySyncMutex = Mutex()
 
     /** Read-only lookup for the selected conversation; never creates a session folder or file. */
+    /** Lists workspace files with a successful read/create/edit tool result in this chat. */
+    suspend fun findWorkingFiles(conversation: Conversation?): List<WorkingFile> {
+        if (conversation == null) return emptyList()
+        val discovered = linkedMapOf<String, WorkingFile>()
+        for (message in conversation.messages) {
+            for (round in message.toolRounds) {
+                val workspaceUri = round.workspaceUri?.takeIf { it.isNotBlank() } ?: continue
+                val repository = runCatching {
+                    SafFileRepository(getApplication<Application>().contentResolver, android.net.Uri.parse(workspaceUri))
+                }.getOrNull() ?: continue
+                for (call in round.toolCalls) {
+                    if (call.name !in setOf("read_file", "create_file", "edit_file")) continue
+                    val path = runCatching {
+                        Json.parseToJsonElement(call.arguments).jsonObject["path"]?.jsonPrimitive?.contentOrNull
+                    }.getOrNull()?.takeIf { it.isNotBlank() } ?: continue
+                    val result = round.results.firstOrNull { it.toolCallId == call.id } ?: continue
+                    val successful = when (call.name) {
+                        "read_file" -> result.content.contains("[FILE_READ status=")
+                        "create_file" -> result.content.startsWith("Created and verified ")
+                        "edit_file" -> result.content.startsWith("Edited and verified ")
+                        else -> false
+                    }
+                    if (!successful) continue
+                    val uri = repository.existingFileUri(path) ?: continue
+                    discovered[workspaceUri + "|" + path] = WorkingFile(path, uri, call.name, message.id)
+                }
+            }
+        }
+        return discovered.values.toList()
+    }
+
     suspend fun findSessionFiles(conversation: Conversation?): SessionFiles? {
         val sessionId = conversation?.sessionId ?: return null
         val storageUri = conversation.sessionStorageUri?.takeIf { it.isNotBlank() } ?: return null
