@@ -336,6 +336,7 @@ fun AppRoot(vm: ChatViewModel) {
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenRequestLogs = { screen = Screen.RequestLogs },
+                        onOpenRequestPanel = { screen = Screen.RequestPanel },
                         hasFileSession = activeConv?.sessionId != null,
                         onRepairHistory = { vm.repairActiveHistory() },
                         onRepairMemory = { vm.repairActiveMemory() },
