@@ -99,10 +99,6 @@ fun ChatScreen(
     onPickModel: () -> Unit,
     onOpenRequestLogs: () -> Unit,
     onOpenRequestPanel: () -> Unit = {},
-    hasFileSession: Boolean = false,
-    onRepairHistory: () -> Unit = {},
-    onRepairMemory: () -> Unit = {},
-    onCreateHistoryTemplate: () -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
@@ -139,10 +135,6 @@ fun ChatScreen(
             onNew = onNew,
             onOpenRequestLogs = onOpenRequestLogs,
             onOpenRequestPanel = onOpenRequestPanel,
-            hasFileSession = hasFileSession,
-            onRepairHistory = onRepairHistory,
-            onRepairMemory = onRepairMemory,
-            onCreateHistoryTemplate = onCreateHistoryTemplate
         )
 
         if (messages.isEmpty()) {
@@ -263,10 +255,6 @@ private fun ChatTopBar(
     onNew: () -> Unit,
     onOpenRequestLogs: () -> Unit,
     onOpenRequestPanel: () -> Unit,
-    hasFileSession: Boolean,
-    onRepairHistory: () -> Unit,
-    onRepairMemory: () -> Unit,
-    onCreateHistoryTemplate: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -299,20 +287,6 @@ private fun ChatTopBar(
             IconButton(onClick = onOpenRequestLogs) {
                 Icon(Icons.Default.Article, contentDescription = "LLM request logs",
                     tint = MaterialTheme.colorScheme.onSurface)
-            }
-            if (hasFileSession) {
-                IconButton(onClick = onRepairHistory) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Repair history.md",
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = onRepairMemory) {
-                    Icon(Icons.Default.Build, contentDescription = "Repair memory.md",
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = onCreateHistoryTemplate) {
-                    Icon(Icons.Default.Add, contentDescription = "Create history.md template",
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
             }
             IconButton(onClick = onNew) {
                 Icon(Icons.Default.Edit, contentDescription = "new chat",
