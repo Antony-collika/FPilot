@@ -33,7 +33,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -47,6 +46,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.HorizontalDivider
@@ -384,7 +384,14 @@ private fun MessageItem(
             senderLabel = senderLabel,
             isLastAssistant = isLastAssistant,
             isStreaming = isStreaming,
-            onDelete = onDelete
+            editing = editing,
+            editingDraft = editingDraft,
+            onEditingDraftChange = onEditingDraftChange,
+            onStartEdit = onStartEdit,
+            onCommitEdit = onCommitEdit,
+            onCancelEdit = onCancelEdit,
+            onDelete = onDelete,
+            onBranchFromHere = onBranchFromHere
         )
     }
 }
@@ -508,17 +515,24 @@ private fun UserBubble(
                             )
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        SelectionContainer {
-                            Text(
-                                text = message.content,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
+                        Text(
+                            text = message.content,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
                     }
                     androidx.compose.material3.DropdownMenu(
                         expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false }
+                        onDismissRequest = { menuOpen = false },
+                        shape = RoundedCornerShape(18.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 14.dp,
+                        modifier = Modifier.border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(18.dp)
+                        )
                     ) {
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(stringResource(R.string.copy)) },
@@ -529,7 +543,7 @@ private fun UserBubble(
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit)) },
+                            text = { Text("Edit message") },
                             leadingIcon = { Icon(Icons.Default.Edit, null) },
                             onClick = {
                                 menuOpen = false
@@ -537,7 +551,7 @@ private fun UserBubble(
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit_regenerate_from_here)) },
+                            text = { Text("Edit & regenerate") },
                             leadingIcon = { Icon(Icons.Default.Refresh, null) },
                             onClick = {
                                 menuOpen = false
@@ -545,18 +559,11 @@ private fun UserBubble(
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.regenerate_from_here)) },
+                            text = { Text("Regenerate") },
                             leadingIcon = { Icon(Icons.Default.Refresh, null) },
                             onClick = {
                                 menuOpen = false
                                 onRegenerateFrom()
-                            }
-                        )
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(stringResource(R.string.branch_from_here)) },
-                            onClick = {
-                                menuOpen = false
-                                onBranchFromHere()
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(
@@ -587,7 +594,14 @@ private fun AssistantRow(
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
-    onDelete: () -> Unit
+    editing: Boolean,
+    editingDraft: String,
+    onEditingDraftChange: (String) -> Unit,
+    onStartEdit: () -> Unit,
+    onCommitEdit: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onBranchFromHere: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
@@ -608,6 +622,34 @@ private fun AssistantRow(
         Spacer(Modifier.height(8.dp))
         if (message.content.isEmpty() && isLastAssistant && isStreaming) {
             TypingDots()
+        } else if (editing) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(12.dp)
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = editingDraft,
+                    onValueChange = onEditingDraftChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 16.sp,
+                        lineHeight = 22.sp
+                    ),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary)
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    androidx.compose.material3.TextButton(onClick = onCancelEdit) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    androidx.compose.material3.TextButton(onClick = onCommitEdit) {
+                        Text(stringResource(R.string.save))
+                    }
+                }
+            }
         } else {
             Box {
                 Box(
@@ -618,17 +660,24 @@ private fun AssistantRow(
                             onLongClick = { if (message.content.isNotEmpty()) menuOpen = true }
                         )
                 ) {
-                    SelectionContainer {
-                        MarkdownText(
-                            text = message.content,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    MarkdownText(
+                        text = message.content,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
                 androidx.compose.material3.DropdownMenu(
                     expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false }
+                    onDismissRequest = { menuOpen = false },
+                    shape = RoundedCornerShape(18.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 14.dp,
+                    modifier = Modifier.border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(18.dp)
+                    )
                 ) {
                     androidx.compose.material3.DropdownMenuItem(
                         text = { Text(stringResource(R.string.copy)) },
@@ -639,7 +688,23 @@ private fun AssistantRow(
                         }
                     )
                     androidx.compose.material3.DropdownMenuItem(
-                        text = { Text(stringResource(R.string.delete)) },
+                        text = { Text("Edit message") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = {
+                            menuOpen = false
+                            onStartEdit()
+                        }
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Branch in new chat") },
+                        leadingIcon = { Icon(Icons.Default.CallSplit, null) },
+                        onClick = {
+                            menuOpen = false
+                            onBranchFromHere()
+                        }
+                    )
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(
                                 androidx.compose.material.icons.Icons.Default.Delete,
