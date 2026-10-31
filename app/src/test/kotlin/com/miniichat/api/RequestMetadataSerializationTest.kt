@@ -38,7 +38,8 @@ class RequestMetadataSerializationTest {
     fun disabledChatControlsAreOmittedEvenIfLegacyProviderValuesExist() {
         val provider = ProviderConfig(
             "openai", "OpenAI", "https://api.openai.com/v1", "key",
-            metadataParameters = mapOf("temperature" to "1.5", "top_p" to "0.9", "max_completion_tokens" to "9000")
+            metadataParameters = mapOf("temperature" to "1.5", "top_p" to "0.9", "max_completion_tokens" to "9000"),
+            extraBody = mapOf("temperature" to "1.8", "top_p" to "0.95", "max_completion_tokens" to "12000")
         )
         val settings = AppSettings(temperature = 1.1f, temperatureEnabled = false, topPEnabled = false)
         val body = Json.parseToJsonElement(

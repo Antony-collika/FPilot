@@ -283,7 +283,7 @@ class LlmClient {
                 put(k, coerceToJson(v))
             }
             for ((k, v) in provider.extraBody) {
-                if (k.isBlank()) continue
+                if (k.isBlank() || k in requestMetadata) continue
                 put(k, coerceToJson(v))
             }
         }
@@ -385,7 +385,7 @@ class LlmClient {
                 put(key, coerceToJson(value))
             }
             for ((key, value) in provider.extraBody) {
-                if (key.isBlank()) continue
+                if (key.isBlank() || key in requestMetadata) continue
                 put(key, coerceToJson(value))
             }
         }
