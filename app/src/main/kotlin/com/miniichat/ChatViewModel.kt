@@ -15,6 +15,7 @@ import com.miniichat.agent.ExposedTool
 import com.miniichat.api.ToolDefinition
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
+import com.miniichat.files.WorkspaceBootstrap
 import com.miniichat.data.AppSettings
 import com.miniichat.data.Conversation
 import com.miniichat.data.DataStoreSessionRepository
@@ -1614,6 +1615,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** The cards in use: the saved ones, or the ones built from the old Settings. */
     private suspend fun effectiveLayout(): RequestLayout =
         layoutStore.snapshot() ?: layoutFromSettings(settings.value)
+
+    fun initializeWorkspaceDocuments() {
+        viewModelScope.launch {
+            val repository = workspaceRepositoryFor(settings.value)
+            if (repository == null) {
+                _error.value = "Choose a workspace folder before initializing FPilot documents."
+                return@launch
+            }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    WorkspaceBootstrap(repository).initialize()
+                }
+                _toast.value = buildString {
+                    append("Workspace initialized: ")
+                    append(result.created.size).append(" file(s) added; ")
+                    append(result.alreadyPresent.size).append(" existing file(s) preserved.")
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _error.value = "Could not initialize the workspace: ${error.message ?: "unknown error"}"
+            }
+        }
+    }
 
     fun saveLayout(layout: RequestLayout) {
         viewModelScope.launch { layoutStore.save(layout) }
