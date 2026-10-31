@@ -57,6 +57,8 @@ class WorkspaceBootstrap(
             include_system: true
             include_memory: false
             include_skills: true
+            include_workspace_tools: true
+            save_request_snapshots: false
 
             # FPilot workspace configuration
 
