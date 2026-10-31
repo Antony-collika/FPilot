@@ -46,7 +46,10 @@ object HistoryMd {
         val id: String,
         val attachments: List<Attachment> = emptyList(),
         val createdAt: Long,
-        @SerialName("extra_content") val extraContent: JsonObject? = null
+        @SerialName("extra_content") val extraContent: JsonObject? = null,
+        @SerialName("content_sha256") val contentSha256: String? = null,
+        val edited: Boolean = false,
+        @SerialName("original_content_sha256") val originalContentSha256: String? = null
     )
 
     fun empty(sessionId: String, title: String = "New chat", createdAt: Long = System.currentTimeMillis()) =
@@ -196,15 +199,21 @@ object HistoryMd {
                 ?: throw HistoryFormatException(block.startLine + 1, idLine, "Message ID '" + id + "' is missing from history.meta.json.")
             var bodyLines = block.lines.drop(1)
             while (bodyLines.lastOrNull().isNullOrEmpty()) bodyLines = bodyLines.dropLast(1)
+            val body = unescape(bodyLines).joinToString("\n")
+            val contentChanged = meta.contentSha256 != null &&
+                meta.contentSha256 != HistoryMeta.contentSha256(body)
             messages += Message(
                 id = id,
                 role = block.kind,
-                content = unescape(bodyLines).joinToString("\n"),
+                content = body,
                 attachments = meta.attachments,
                 createdAt = meta.createdAt,
                 extraContent = meta.extraContent,
                 turnNo = if (block.kind == "user") block.turn else null,
-                toolRounds = if (block.kind == "assistant") meta.toolRounds else emptyList()
+                toolRounds = if (block.kind == "assistant") meta.toolRounds else emptyList(),
+                edited = meta.edited || contentChanged,
+                originalContentSha256 = meta.originalContentSha256
+                    ?: if (contentChanged) meta.contentSha256 else null
             )
         }
         return HistoryDocument(
@@ -230,6 +239,8 @@ object HistoryMd {
                 throw HistoryFormatException(block.startLine + metadataIndex + 1, raw.lineSequence().firstOrNull().orEmpty(), "Invalid json-meta block: " + it.message)
             }
         }
+        val contentChanged = meta?.contentSha256 != null &&
+            meta.contentSha256 != HistoryMeta.contentSha256(body)
         return Message(
             id = meta?.id ?: "history-t" + block.turn + "-" + role,
             role = role,
@@ -238,7 +249,10 @@ object HistoryMd {
             createdAt = meta?.createdAt ?: System.currentTimeMillis(),
             extraContent = meta?.extraContent,
             turnNo = if (role == "user") block.turn else null,
-            toolRounds = if (role == "assistant") rounds else emptyList()
+            toolRounds = if (role == "assistant") rounds else emptyList(),
+            edited = meta?.edited == true || contentChanged,
+            originalContentSha256 = meta?.originalContentSha256
+                ?: if (contentChanged) meta?.contentSha256 else null
         )
     }
 
@@ -335,7 +349,15 @@ object HistoryMd {
     }
 
     private fun appendMeta(out: StringBuilder, message: Message) {
-        val meta = MessageMeta(message.id, message.attachments, message.createdAt, message.extraContent)
+        val meta = MessageMeta(
+            id = message.id,
+            attachments = message.attachments,
+            createdAt = message.createdAt,
+            extraContent = message.extraContent,
+            contentSha256 = HistoryMeta.contentSha256(message.content),
+            edited = message.edited,
+            originalContentSha256 = message.originalContentSha256
+        )
         out.append("```json-meta\n")
         out.append(json.encodeToString(meta)).append("\n")
         out.append("```\n")
