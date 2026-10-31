@@ -1444,6 +1444,37 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }.joinToString(", ")
                     )
                 }
+                val metadataOrigins = linkedMapOf<String, String>()
+                fun applyOriginLayer(values: Map<String, String>, source: String) {
+                    values.forEach { (key, raw) ->
+                        if (raw.trim() in setOf("@omit", "@disabled", "\"@omit\"", "\"@disabled\"")) {
+                            metadataOrigins.remove(key)
+                        } else {
+                            metadataOrigins[key] = source
+                        }
+                    }
+                }
+                provider?.let { active ->
+                    applyOriginLayer(active.extraBody, "Provider Extra Body")
+                    applyOriginLayer(current.metadataParameters, "Global")
+                    applyOriginLayer(active.metadataParameters, "Provider")
+                    active.metadataParametersByModel[current.activeModel]?.let { raw ->
+                        runCatching {
+                            kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject
+                                .mapValues { it.value.toString() }
+                        }.getOrNull()?.let { applyOriginLayer(it, "Model") }
+                    }
+                    applyOriginLayer(
+                        RequestMetadataAdapter.parameters(active, current.activeModel, current),
+                        "Request Control Panel"
+                    )
+                }
+                if (metadataOrigins.isNotEmpty()) {
+                    append("\n\n--- Metadata field origins (highest-priority value) ---\n")
+                    metadataOrigins.toSortedMap().forEach { (key, source) ->
+                        append(key).append(" ← ").append(source).append('\n')
+                    }
+                }
                 if (apiJson != null) {
                     append("\n\n--- Exact API JSON body for the next request ---\n")
                     append(apiJson)
