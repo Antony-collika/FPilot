@@ -32,7 +32,8 @@ internal object NativeProviderProtocol {
         modelId: String,
         settings: AppSettings,
         messages: List<ChatMessage>,
-        tools: List<ToolDefinition>
+        tools: List<ToolDefinition>,
+        extraBody: Map<String, String> = emptyMap()
     ): String {
         val system = messages.filter { it.role == "system" }
             .joinToString("\n\n") { messageText(it) }
@@ -106,6 +107,12 @@ internal object NativeProviderProtocol {
                     }
                 }
             }
+            extraBody.forEach { (key, raw) ->
+                if (key.isNotBlank() && key !in setOf("model", "max_tokens", "temperature", "messages", "system", "tools")) {
+                    val element = runCatching { json.parseToJsonElement(raw) }.getOrElse { JsonPrimitive(raw) }
+                    put(key, element)
+                }
+            }
         }
         return json.encodeToString(JsonObject.serializer(), body)
     }
@@ -115,7 +122,9 @@ internal object NativeProviderProtocol {
         val content = root["content"]?.jsonArray.orEmpty()
         val text = content.mapNotNull { block ->
             val item = block.jsonObject
-            if (item["type"]?.jsonPrimitive?.contentOrNull == "text") {
+            if (item["type"]?.jsonPrimitive?.contentOrNull == "text" &&
+                item["thought"]?.jsonPrimitive?.contentOrNull != "true"
+            ) {
                 item["text"]?.jsonPrimitive?.contentOrNull
             } else null
         }.joinToString("")
@@ -139,7 +148,8 @@ internal object NativeProviderProtocol {
     fun geminiRequestBody(
         settings: AppSettings,
         messages: List<ChatMessage>,
-        tools: List<ToolDefinition>
+        tools: List<ToolDefinition>,
+        extraBody: Map<String, String> = emptyMap()
     ): String {
         val systemParts = messages.filter { it.role == "system" }
             .map { messageText(it) }
@@ -227,6 +237,12 @@ internal object NativeProviderProtocol {
                 }
                 putJsonObject("toolConfig") {
                     putJsonObject("functionCallingConfig") { put("mode", "AUTO") }
+                }
+            }
+            extraBody.forEach { (key, raw) ->
+                if (key.isNotBlank() && key !in setOf("contents", "systemInstruction", "generationConfig", "tools", "toolConfig")) {
+                    val element = runCatching { json.parseToJsonElement(raw) }.getOrElse { JsonPrimitive(raw) }
+                    put(key, element)
                 }
             }
         }
