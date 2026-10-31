@@ -231,8 +231,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (current.toolPermissionMode != "allow_once") {
             permissionSession.allowOnceGranted = false
         }
-        if (current.toolPermissionMode == "always_allow") return true
-        if (current.toolPermissionMode == "allow_once" && permissionSession.allowOnceGranted) {
+        // "Always allow" and "allow once" apply only to non-mutating tools.
+        // A create/edit operation always receives a fresh, operation-specific confirmation.
+        if (!isWrite && current.toolPermissionMode == "always_allow") return true
+        if (!isWrite && current.toolPermissionMode == "allow_once" && permissionSession.allowOnceGranted) {
             return true
         }
 
@@ -258,7 +260,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val approved = deferred.await()
             // Approval authorizes the remaining tool calls only in this Agent run.
             // Never persist the temporary grant into AppSettings.
-            if (approved && settings.value.toolPermissionMode == "allow_once") {
+            if (approved && !isWrite && settings.value.toolPermissionMode == "allow_once") {
                 permissionSession.allowOnceGranted = true
             }
             approved
