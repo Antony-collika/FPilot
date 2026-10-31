@@ -49,16 +49,30 @@ sealed interface GenerationEvent {
 interface GenerationRuntime {
     val capabilities: GenerationCapabilities
 
+    fun capabilitiesFor(provider: ProviderConfig): GenerationCapabilities = when (provider.apiStyle) {
+        "anthropic", "gemini" -> GenerationCapabilities(
+            streamingText = false,
+            toolCalling = true,
+            streamingToolCalls = false
+        )
+        "openai_compatible", "" -> capabilities
+        else -> GenerationCapabilities(
+            streamingText = false,
+            toolCalling = false,
+            streamingToolCalls = false
+        )
+    }
+
     suspend fun complete(request: GenerationRequest): ChatMessage
 
     fun stream(request: GenerationRequest): Flow<GenerationEvent>
 }
 
 /**
- * First adapter: the existing OpenAI-compatible Ktor client. This preserves current behavior
- * while allowing the agent and chat layers to depend on a provider-neutral contract.
+ * Provider adapter facade. LlmClient owns the OpenAI-compatible, native Anthropic, and native
+ * Gemini protocol codecs while the agent and UI depend only on this normalized runtime contract.
  */
-class OpenAiCompatibleGenerationRuntime(
+class ProviderGenerationRuntime(
     private val client: LlmClient
 ) : GenerationRuntime {
     override val capabilities = GenerationCapabilities(
