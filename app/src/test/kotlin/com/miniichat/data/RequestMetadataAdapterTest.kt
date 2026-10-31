@@ -44,7 +44,7 @@ class RequestMetadataAdapterTest {
         val values = RequestMetadataAdapter.parameters(provider, "gpt-4o", settings)
 
         assertEquals("@omit", values["temperature"])
-        assertEquals(1.2f, settings.temperature)
+        assertEquals(1.2f, settings.temperature, 0.0001f)
     }
 
     @Test
