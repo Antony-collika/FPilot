@@ -229,7 +229,7 @@ object MarkdownFileTools {
                 "Only Markdown files can be created by this tool."
             }
             require(!files.exists(path)) { "File already exists; refusing to overwrite it." }
-            files.writeText(path, content)
+            files.createTextIfAbsent(path, content)
             val saved = files.readText(path)
             check(saved == content) { "Verification failed: saved content differs from requested content." }
             return "Created and verified $path (${saved.length} characters)."
@@ -257,16 +257,29 @@ object MarkdownFileTools {
             val changed = original.replaceFirst(target, replacement)
             require(changed.length <= maxWriteChars) { "Edited content exceeds the configured $maxWriteChars character write limit." }
             try {
-                files.writeText(path, changed)
+                files.writeTextIfUnchanged(path, original, changed)
                 val saved = files.readText(path)
                 check(saved == changed) { "Verification failed: saved content differs from requested content." }
             } catch (error: Exception) {
+                // Never restore over a concurrent external edit. Restore only if the file still
+                // contains exactly the value written by this operation.
                 val restored = runCatching {
-                    files.writeText(path, original)
-                    files.readText(path) == original
+                    val current = files.readText(path)
+                    when (current) {
+                        original -> true
+                        changed -> {
+                            files.writeTextIfUnchanged(path, changed, original)
+                            files.readText(path) == original
+                        }
+                        else -> false
+                    }
                 }.getOrDefault(false)
-                val recovery = if (restored) " Original content was restored." else
-                    " Automatic restoration could not be confirmed; inspect the file before retrying."
+                val recovery = when {
+                    restored -> " Original content is intact or was restored."
+                    error.message?.startsWith("Conflict:") == true ->
+                        " The file changed since it was read; the external version was left untouched."
+                    else -> " Automatic restoration could not be confirmed; inspect the file before retrying."
+                }
                 throw IllegalStateException(
                     "Edit failed for $path. $recovery",
                     error
