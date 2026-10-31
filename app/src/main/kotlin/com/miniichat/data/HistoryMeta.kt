@@ -19,7 +19,10 @@ data class HistoryMessageMetadata(
     val attachments: List<Attachment> = emptyList(),
     val createdAt: Long,
     @SerialName("extra_content") val extraContent: JsonObject? = null,
-    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList()
+    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList(),
+    @SerialName("content_sha256") val contentSha256: String? = null,
+    val edited: Boolean = false,
+    @SerialName("original_content_sha256") val originalContentSha256: String? = null
 )
 
 /** Sidecar metadata for the ID-linked, human-readable history.md format. */
@@ -48,6 +51,11 @@ object HistoryMeta {
         return json.encodeToString(current.copy(messages = retained))
     }
 
+    fun contentSha256(content: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(content.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
+
     fun render(document: HistoryDocument): String {
         val messages = linkedMapOf<String, HistoryMessageMetadata>()
         document.messages.forEach { message ->
@@ -57,7 +65,10 @@ object HistoryMeta {
                 attachments = message.attachments,
                 createdAt = message.createdAt,
                 extraContent = message.extraContent,
-                toolRounds = message.toolRounds
+                toolRounds = message.toolRounds,
+                contentSha256 = contentSha256(message.content),
+                edited = message.edited,
+                originalContentSha256 = message.originalContentSha256
             )
         }
         return json.encodeToString(
