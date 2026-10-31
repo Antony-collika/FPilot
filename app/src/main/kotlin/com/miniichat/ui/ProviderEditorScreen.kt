@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.ProviderKinds
 import com.miniichat.data.ProviderPresets
 import com.miniichat.util.BaseUrlNormalizer
 import com.miniichat.util.newId
@@ -73,6 +74,8 @@ fun ProviderEditorScreen(
         mutableStateOf(initial?.apiProtocol ?: com.miniichat.data.ProviderApiProtocol.CHAT_COMPLETIONS)
     }
     var apiProtocolMenuOpen by remember(initial?.id) { mutableStateOf(false) }
+    var providerType by remember(initial?.id) { mutableStateOf(initial?.providerType ?: ProviderKinds.AUTO) }
+    var providerTypeMenuOpen by remember(initial?.id) { mutableStateOf(false) }
     var presetBaseUrl by remember(initial?.id) { mutableStateOf("") }
     var headerRows by remember(initial?.id) {
         mutableStateOf<List<Pair<String, String>>>(
@@ -84,9 +87,17 @@ fun ProviderEditorScreen(
             initial?.extraBody?.map { it.key to it.value } ?: emptyList()
         )
     }
+    var metadataRows by remember(initial?.id) {
+        mutableStateOf<List<Pair<String, String>>>(initial?.metadataParameters?.map { it.key to it.value } ?: emptyList())
+    }
+    var modelMetadataRows by remember(initial?.id) {
+        mutableStateOf<List<Pair<String, String>>>(initial?.metadataParametersByModel?.map { it.key to it.value } ?: emptyList())
+    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
             || (initial?.extraBody?.isNotEmpty() == true)
+            || (initial?.metadataParameters?.isNotEmpty() == true)
+            || (initial?.metadataParametersByModel?.isNotEmpty() == true)
 )
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
@@ -137,7 +148,12 @@ fun ProviderEditorScreen(
                         apiKey = apiKey.trim(),
                         customHeaders = headers,
                         extraBody = body,
-                        apiProtocol = apiProtocol
+                        apiProtocol = apiProtocol,
+                        providerType = providerType,
+                        metadataParameters = metadataRows.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim() },
+                        metadataParametersByModel = modelMetadataRows.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim() }
                     )
                     onSave(p)
                 }
@@ -172,6 +188,37 @@ fun ProviderEditorScreen(
             }
             FieldSection(stringResource(R.string.setting_api_key)) {
                 EditableValue(apiKey, "", monospace = true) { apiKey = it }
+            }
+            FieldSection("Provider identity") {
+                Box(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { providerTypeMenuOpen = true }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            ProviderKinds.choices.firstOrNull { it.first == providerType }?.second ?: "Custom / Other",
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Icon(Icons.Default.ExpandMore, contentDescription = "Choose provider")
+                    }
+                    DropdownMenu(expanded = providerTypeMenuOpen, onDismissRequest = { providerTypeMenuOpen = false }) {
+                        ProviderKinds.choices.forEach { (id, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { providerType = id; providerTypeMenuOpen = false }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "Automatic mode identifies known providers from the API hostname, not the display name. Select an identity explicitly for custom domains.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             FieldSection("API protocol") {
                 Box(Modifier.fillMaxWidth()) {
@@ -253,6 +300,18 @@ fun ProviderEditorScreen(
                     rows = bodyRows,
                     onChange = { bodyRows = it.toMutableList() }
                 )
+                KeyValueEditor(
+                    title = "Provider metadata",
+                    hint = "Native API keys or dotted paths. Enter JSON literals such as 0.8, true, \"fast\", or {\"effort\":\"high\"}. Use \"@disabled\" to remove an inherited value.",
+                    rows = metadataRows,
+                    onChange = { metadataRows = it.toMutableList() }
+                )
+                KeyValueEditor(
+                    title = "Model-specific metadata",
+                    hint = "Key: exact model ID. Value: one JSON object. This overrides provider metadata; omitted keys inherit the provider layer. Use \"@disabled\" for an explicit removal.",
+                    rows = modelMetadataRows,
+                    onChange = { modelMetadataRows = it.toMutableList() }
+                )
             }
 
             Spacer(Modifier.height(40.dp))
@@ -280,6 +339,7 @@ fun ProviderEditorScreen(
                                 .clickable {
                                     if (name.isBlank()) name = preset.name
                                     presetBaseUrl = preset.baseUrl
+                                    providerType = ProviderKinds.fromPreset(preset.name)
                                     presetSheetOpen = false
                                 }
                                 .padding(vertical = 8.dp, horizontal = 4.dp)

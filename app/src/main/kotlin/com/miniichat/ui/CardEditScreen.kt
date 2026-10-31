@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -39,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import com.miniichat.data.AppSettings
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.RequestMetadataAdapter
+import com.miniichat.data.MetadataParameterCatalog
+import com.miniichat.data.ProviderCapabilityRegistry
 import com.miniichat.data.CardRole
 import com.miniichat.data.RequestCard
 import com.miniichat.data.SessionFiles
@@ -88,6 +91,11 @@ fun CardEditScreen(
     var reasoningEffort by remember(card.id) { mutableStateOf(settings.reasoningEffort) }
     var reasoningEnabled by remember(card.id) { mutableStateOf(settings.reasoningEnabled) }
     var stream by remember(card.id) { mutableStateOf(settings.stream) }
+    var metadataOverridesText by remember(card.id) {
+        mutableStateOf(MetadataParameterCatalog.formatOverrides(settings.metadataParameters))
+    }
+    var allowUnverifiedMetadata by remember(card.id) { mutableStateOf(settings.allowUnverifiedMetadata) }
+    var metadataJsonError by remember(card.id) { mutableStateOf<String?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
     LaunchedEffect(pickedFile) {
@@ -103,7 +111,9 @@ fun CardEditScreen(
             topP != settings.topP || topPEnabled != settings.topPEnabled ||
             maxOutputTokens != settings.maxOutputTokens || maxOutputTokensEnabled != settings.maxOutputTokensEnabled ||
             reasoningEffort != settings.reasoningEffort || reasoningEnabled != settings.reasoningEnabled ||
-            stream != settings.stream
+            stream != settings.stream ||
+            metadataOverridesText != MetadataParameterCatalog.formatOverrides(settings.metadataParameters) ||
+            allowUnverifiedMetadata != settings.allowUnverifiedMetadata
     } else {
         draft != card
     }
@@ -114,13 +124,22 @@ fun CardEditScreen(
 
     fun save() {
         if (isMetadata) {
+            val parsedMetadata = runCatching {
+                MetadataParameterCatalog.parseOverrides(metadataOverridesText)
+            }.getOrElse {
+                metadataJsonError = it.message ?: "Metadata JSON is invalid."
+                return
+            }
+            metadataOverridesText = MetadataParameterCatalog.formatOverrides(parsedMetadata)
             onSaveSettings {
                 it.copy(
                     temperature = temperature, temperatureEnabled = temperatureEnabled,
                     topP = topP, topPEnabled = topPEnabled,
                     maxOutputTokens = maxOutputTokens, maxOutputTokensEnabled = maxOutputTokensEnabled,
                     reasoningEffort = reasoningEffort, reasoningEnabled = reasoningEnabled,
-                    stream = stream
+                    stream = stream,
+                    metadataParameters = parsedMetadata,
+                    allowUnverifiedMetadata = allowUnverifiedMetadata
                 )
             }
         } else {
@@ -157,7 +176,12 @@ fun CardEditScreen(
                     maxOutputTokensEnabled = maxOutputTokensEnabled, onMaxOutputTokensEnabled = { maxOutputTokensEnabled = it },
                     reasoningEffort = reasoningEffort, onReasoningEffort = { reasoningEffort = it },
                     reasoningEnabled = reasoningEnabled, onReasoningEnabled = { reasoningEnabled = it },
-                    stream = stream, onStream = { stream = it }
+                    stream = stream, onStream = { stream = it },
+                    metadataOverridesText = metadataOverridesText,
+                    onMetadataOverridesText = { metadataOverridesText = it; metadataJsonError = null },
+                    allowUnverifiedMetadata = allowUnverifiedMetadata,
+                    onAllowUnverifiedMetadata = { allowUnverifiedMetadata = it },
+                    metadataJsonError = metadataJsonError
                 )
                 CardRole.DIRECTORY_TREE -> TreeEditor(draft, hasWorkspace) { draft = it }
                 CardRole.HISTORY -> HistoryEditor(draft, dirty, { draft = it }, onOpenHistoryManager, sessionFiles, onRepairHistory, onCreateHistoryTemplate, onOpenFile)
@@ -223,7 +247,12 @@ private fun MetadataEditor(
     maxOutputTokensEnabled: Boolean, onMaxOutputTokensEnabled: (Boolean) -> Unit,
     reasoningEffort: String, onReasoningEffort: (String) -> Unit,
     reasoningEnabled: Boolean, onReasoningEnabled: (Boolean) -> Unit,
-    stream: Boolean, onStream: (Boolean) -> Unit
+    stream: Boolean, onStream: (Boolean) -> Unit,
+    metadataOverridesText: String,
+    onMetadataOverridesText: (String) -> Unit,
+    allowUnverifiedMetadata: Boolean,
+    onAllowUnverifiedMetadata: (Boolean) -> Unit,
+    metadataJsonError: String?
 ) {
     var reasoningMenu by remember { mutableStateOf(false) }
     Text("Model", style = MaterialTheme.typography.labelLarge)
@@ -235,9 +264,11 @@ private fun MetadataEditor(
     if ("temperature" in supported) MetadataSlider(
         "Temperature", "Controls randomness. Lower values are more focused.", temperature, 0f..2f,
         "%.2f".format(temperature), temperatureEnabled, onTemperatureEnabled, onTemperature)
+    provider?.let { CapabilityHint(it, settings.activeModel, "temperature") }
     if ("top_p" in supported) MetadataSlider(
         "Top P", "Controls how broadly the model considers likely next tokens.", topP, 0f..1f,
         "%.2f".format(topP), topPEnabled, onTopPEnabled, onTopP)
+    provider?.let { CapabilityHint(it, settings.activeModel, "top_p") }
     if ("max_output_tokens" in supported) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -253,6 +284,7 @@ private fun MetadataEditor(
                 onValueChange = { onMaxOutputTokens((it / 256f).toInt() * 256) },
                 valueRange = 256f..16384f, steps = 62, enabled = maxOutputTokensEnabled)
         }
+        provider?.let { CapabilityHint(it, settings.activeModel, "max_output_tokens") }
     }
     if ("reasoning_effort" in supported) {
         Column {
@@ -269,20 +301,53 @@ private fun MetadataEditor(
                     Text(reasoningEffort.replaceFirstChar { it.uppercase() })
                 }
                 DropdownMenu(expanded = reasoningMenu, onDismissRequest = { reasoningMenu = false }) {
-                    listOf("low", "medium", "high").forEach { level ->
+                    listOf("none", "minimal", "low", "medium", "high", "xhigh", "max").forEach { level ->
                         DropdownMenuItem(text = { Text(level.replaceFirstChar { it.uppercase() }) },
                             onClick = { onReasoningEffort(level); reasoningMenu = false })
                     }
                 }
             }
         }
+        provider?.let { CapabilityHint(it, settings.activeModel, "reasoning_effort") }
     }
-    if (supported.isEmpty()) Text(
-        "No verified optional settings are available for this provider and model. No metadata options will be sent.",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SwitchRow(
+        title = "Send common controls without verified provider support",
+        description = "Global opt-in for model-dependent or unverified providers. An endpoint may still reject a field; check the request preview and provider documentation.",
+        checked = allowUnverifiedMetadata,
+        onCheckedChange = onAllowUnverifiedMetadata
+    )
+    Text("Advanced metadata (global)", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Enter a JSON object. Values retain their JSON types. Use dotted paths such as \"reasoning.effort\" for nested fields. Use \"@disabled\" to remove an inherited field. Provider and model settings override this global layer.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    OutlinedTextField(
+        value = metadataOverridesText,
+        onValueChange = onMetadataOverridesText,
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 4,
+        maxLines = 12,
+        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+        label = { Text("JSON metadata object") }
+    )
+    metadataJsonError?.let {
+        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
     SwitchRow(title = "Streaming",
         description = "Show the answer as it is written. Used when no tools run; with tools the app waits for the whole answer.",
         checked = stream, onCheckedChange = onStream)
+}
+
+@Composable
+private fun CapabilityHint(provider: ProviderConfig, model: String, key: String) {
+    val capability = RequestMetadataAdapter.capabilitySummary(provider, model, key)
+    Text(
+        "${ProviderCapabilityRegistry.statusLabel(capability.status)} · ${capability.explanation}" +
+            (capability.sourceUrl?.let { "\nReference: $it" } ?: ""),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable

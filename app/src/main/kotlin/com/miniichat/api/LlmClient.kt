@@ -187,25 +187,108 @@ class LlmClient {
     private fun responsesEndpoint(baseUrl: String) = "${baseUrl.trimEnd('/')}/responses"
     private fun modelsEndpoint(baseUrl: String) = "${baseUrl.trimEnd('/')}/models"
 
-    /** Best-effort parse of a value that may be a number, bool, or string. */
+    /** Parse a native JSON literal; non-JSON values are retained as strings. */
     private fun coerceToJson(v: String): JsonElement =
         runCatching { json.parseToJsonElement(v) }.getOrElse { JsonPrimitive(v) }
 
-    private fun isOmittedMetadataValue(value: String): Boolean =
-        value.isBlank() || value == "@omit" || value == "null" || value == "\"@omit\"" || value == "\"\""
+    private val protectedMetadataRoots = setOf("model", "messages", "input", "stream", "tools")
 
-    private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String, requestMetadata: Map<String, String>): Map<String, String> {
-        val resolved = provider.metadataParameters.toMutableMap()
+    private fun mergeJsonObjects(base: JsonObject, override: JsonObject): JsonObject {
+        val merged = base.toMutableMap()
+        for ((key, value) in override) {
+            val previous = merged[key]
+            merged[key] = if (previous is JsonObject && value is JsonObject) {
+                mergeJsonObjects(previous, value)
+            } else value
+        }
+        return JsonObject(merged)
+    }
+
+    private fun setMetadataPath(target: JsonObject, path: String, value: JsonElement): JsonObject {
+        val parts = path.split('.').map { it.trim() }
+        if (parts.isEmpty() || parts.any { it.isEmpty() }) return target
+        if (parts.first() in protectedMetadataRoots) return target
+        fun setAt(current: JsonObject, index: Int): JsonObject {
+            val key = parts[index]
+            val oldValue = current[key]
+            val nextValue = if (index == parts.lastIndex) {
+                if (oldValue is JsonObject && value is JsonObject) mergeJsonObjects(oldValue, value) else value
+            } else {
+                val child = oldValue as? JsonObject ?: JsonObject(emptyMap())
+                setAt(child, index + 1)
+            }
+            return JsonObject(current.toMutableMap().apply { put(key, nextValue) })
+        }
+        return setAt(target, 0)
+    }
+
+    private fun removeMetadataPath(target: JsonObject, path: String): JsonObject {
+        val parts = path.split('.').map { it.trim() }
+        if (parts.isEmpty() || parts.any { it.isEmpty() } || parts.first() in protectedMetadataRoots) return target
+        fun removeAt(current: JsonObject, index: Int): JsonObject {
+            val key = parts[index]
+            if (index == parts.lastIndex) {
+                return JsonObject(current.toMutableMap().apply { remove(key) })
+            }
+            val child = current[key] as? JsonObject ?: return current
+            val nextChild = removeAt(child, index + 1)
+            return JsonObject(current.toMutableMap().apply {
+                if (nextChild.isEmpty()) remove(key) else put(key, nextChild)
+            })
+        }
+        return removeAt(target, 0)
+    }
+
+    /**
+     * Applies one precedence layer. @omit and @disabled are explicit tombstones;
+     * JSON null, false, zero, empty arrays and empty objects remain real values.
+     */
+    private fun applyMetadataLayer(target: JsonObject, values: Map<String, String>): JsonObject {
+        var result = target
+        for ((key, raw) in values) {
+            if (key.isBlank() || raw.isBlank()) continue
+            val parsed = coerceToJson(raw)
+            val explicitRemoval = raw.trim() in setOf("@omit", "@disabled")
+            val quotedRemoval = (parsed as? JsonPrimitive)?.let {
+                it.isString && it.content in setOf("@omit", "@disabled")
+            } ?: false
+            result = if (explicitRemoval || quotedRemoval) {
+                removeMetadataPath(result, key)
+            } else {
+                setMetadataPath(result, key, parsed)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Exact precedence: API extra-body defaults < global < provider < exact model < active RCP.
+     * Capability checks are advisory; arbitrary user-defined keys are never silently filtered.
+     */
+    private fun resolvedMetadataObject(
+        provider: ProviderConfig,
+        modelId: String,
+        globalMetadata: Map<String, String>,
+        requestMetadata: Map<String, String>
+    ): JsonObject {
+        var resolved = JsonObject(emptyMap())
+        resolved = applyMetadataLayer(resolved, provider.extraBody)
+        resolved = applyMetadataLayer(resolved, globalMetadata)
+        resolved = applyMetadataLayer(resolved, provider.metadataParameters)
         val modelOverrides = provider.metadataParametersByModel[modelId]?.let { raw ->
             runCatching { json.parseToJsonElement(raw).jsonObject }.getOrElse {
                 throw IllegalArgumentException("Model-specific metadata for '$modelId' must be a valid JSON object.")
             }
         }
-        modelOverrides?.forEach { (key, value) -> resolved[key] = value.toString() }
-        // Request Control Panel values are the final user-facing source of truth.
-        resolved.putAll(requestMetadata)
+        if (modelOverrides != null) {
+            resolved = applyMetadataLayer(resolved, modelOverrides.mapValues { it.value.toString() })
+        }
+        resolved = applyMetadataLayer(resolved, requestMetadata)
         return resolved
     }
+
+    private fun applyResolvedMetadata(body: JsonObject, metadata: JsonObject): JsonObject =
+        mergeJsonObjects(body, metadata)
 
     internal fun buildRequestBody(
         provider: ProviderConfig,
@@ -215,7 +298,8 @@ class LlmClient {
         temperature: Float,
         tools: List<ToolDefinition> = emptyList(),
         conversationId: String? = null,
-        requestMetadata: Map<String, String> = emptyMap()
+        requestMetadata: Map<String, String> = emptyMap(),
+        globalMetadata: Map<String, String> = emptyMap()
     ): String {
         val msgsJson = kotlinx.serialization.json.buildJsonArray {
             for (m in messages) {
@@ -250,13 +334,10 @@ class LlmClient {
                 })
             }
         }
-        val metadata = resolvedMetadataParameters(provider, modelId, requestMetadata)
+        val metadata = resolvedMetadataObject(provider, modelId, globalMetadata, requestMetadata)
         val obj = buildJsonObject {
             put("model", modelId)
             put("stream", stream)
-            val temperatureValue = metadata["temperature"]
-            if (temperatureValue == null) put("temperature", temperature)
-            else if (!isOmittedMetadataValue(temperatureValue)) put("temperature", coerceToJson(temperatureValue))
             put("messages", msgsJson)
             mistralPromptCacheKey(provider, conversationId)?.let {
                 put("prompt_cache_key", it)
@@ -276,18 +357,11 @@ class LlmClient {
                 })
                 put("tool_choice", "auto")
             }
-            // Metadata overrides are provider-scoped and only emitted when explicitly configured.
-            for ((k, v) in metadata) {
-                if (k.isBlank() || k == "temperature" || isOmittedMetadataValue(v)) continue
-                if (v.isBlank()) continue
-                put(k, coerceToJson(v))
-            }
-            for ((k, v) in provider.extraBody) {
-                if (k.isBlank() || k in requestMetadata) continue
-                put(k, coerceToJson(v))
-            }
         }
-        return json.encodeToString(JsonObject.serializer(), obj)
+        return json.encodeToString(
+            JsonObject.serializer(),
+            applyResolvedMetadata(obj, metadata)
+        )
     }
 
     /**
@@ -300,7 +374,8 @@ class LlmClient {
         messages: List<ChatMessage>,
         stream: Boolean,
         tools: List<ToolDefinition> = emptyList(),
-        requestMetadata: Map<String, String> = emptyMap()
+        requestMetadata: Map<String, String> = emptyMap(),
+        globalMetadata: Map<String, String> = emptyMap()
     ): String {
         val input = kotlinx.serialization.json.buildJsonArray {
             for (message in messages) {
@@ -358,7 +433,7 @@ class LlmClient {
             }
         }
 
-        val metadata = resolvedMetadataParameters(provider, modelId, requestMetadata)
+        val metadata = resolvedMetadataObject(provider, modelId, globalMetadata, requestMetadata)
         val body = buildJsonObject {
             put("model", modelId)
             put("input", input)
@@ -378,18 +453,11 @@ class LlmClient {
                 })
                 put("tool_choice", "auto")
             }
-            // Metadata overrides use the selected protocol's native JSON field names.
-            for ((key, value) in metadata) {
-                if (key.isBlank() || isOmittedMetadataValue(value)) continue
-                if (value.isBlank()) continue
-                put(key, coerceToJson(value))
-            }
-            for ((key, value) in provider.extraBody) {
-                if (key.isBlank() || key in requestMetadata) continue
-                put(key, coerceToJson(value))
-            }
         }
-        return json.encodeToString(JsonObject.serializer(), body)
+        return json.encodeToString(
+            JsonObject.serializer(),
+            applyResolvedMetadata(body, metadata)
+        )
     }
 
     private fun responsesMetadata(output: JsonArray): JsonObject = buildJsonObject {
@@ -460,8 +528,9 @@ class LlmClient {
         conversationId: String? = null
     ): ChatMessage {
         val requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings)
+        val globalMetadata = settings.metadataParameters
         if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) {
-            return completeResponsesTurn(provider, modelId, messages, tools, requestMetadata)
+            return completeResponsesTurn(provider, modelId, messages, tools, requestMetadata, globalMetadata)
         }
         val bodyText = buildRequestBody(
             provider = provider,
@@ -471,7 +540,8 @@ class LlmClient {
             temperature = settings.temperature,
             tools = tools,
             conversationId = conversationId,
-            requestMetadata = requestMetadata
+            requestMetadata = requestMetadata,
+            globalMetadata = globalMetadata
         )
         recordRequestBody(bodyText)
         val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
@@ -504,10 +574,12 @@ class LlmClient {
         modelId: String,
         messages: List<ChatMessage>,
         tools: List<ToolDefinition>,
-        requestMetadata: Map<String, String>
+        requestMetadata: Map<String, String>,
+        globalMetadata: Map<String, String>
     ): ChatMessage {
         val bodyText = buildResponsesRequestBody(
-            provider, modelId, messages, stream = false, tools = tools, requestMetadata = requestMetadata
+            provider, modelId, messages, stream = false, tools = tools,
+            requestMetadata = requestMetadata, globalMetadata = globalMetadata
         )
         recordRequestBody(bodyText)
         val response = client.preparePost(responsesEndpoint(provider.baseUrl)) {
@@ -607,8 +679,13 @@ class LlmClient {
         onExtraContent: (JsonObject) -> Unit = {}
     ): Flow<String> = flow {
         val useResponses = provider.apiProtocol == ProviderApiProtocol.RESPONSES
+        val requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings)
+        val globalMetadata = settings.metadataParameters
         val bodyText = if (useResponses) {
-            buildResponsesRequestBody(provider, modelId, messages, stream = settings.stream, requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings))
+            buildResponsesRequestBody(
+                provider, modelId, messages, stream = settings.stream,
+                requestMetadata = requestMetadata, globalMetadata = globalMetadata
+            )
         } else {
             buildRequestBody(
                 provider = provider,
@@ -617,7 +694,8 @@ class LlmClient {
                 stream = settings.stream,
                 temperature = settings.temperature,
                 conversationId = conversationId,
-                requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings)
+                requestMetadata = requestMetadata,
+                globalMetadata = globalMetadata
             )
         }
         recordRequestBody(bodyText)

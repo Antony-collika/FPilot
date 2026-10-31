@@ -308,10 +308,12 @@ private fun summaryOf(
 ): String = when (card.role) {
     CardRole.METADATA -> {
         val active = buildList {
-            if (settings.temperatureEnabled) add("temperature ${"%.2f".format(settings.temperature)}")
-            if (settings.topPEnabled) add("top-p ${"%.2f".format(settings.topP)}")
-            if (settings.maxOutputTokensEnabled) add("${settings.maxOutputTokens} output tokens")
-            if (settings.reasoningEnabled) add("reasoning ${settings.reasoningEffort}")
+            if (settings.temperatureEnabled) add("temperature configured ${"%.2f".format(settings.temperature)}")
+            if (settings.topPEnabled) add("top-p configured ${"%.2f".format(settings.topP)}")
+            if (settings.maxOutputTokensEnabled) add("${settings.maxOutputTokens} output tokens configured")
+            if (settings.reasoningEnabled) add("reasoning configured ${settings.reasoningEffort}")
+            if (settings.metadataParameters.isNotEmpty()) add("${settings.metadataParameters.size} global custom field(s)")
+            if (settings.allowUnverifiedMetadata) add("unverified controls allowed")
         }.joinToString(" · ").ifBlank { "provider defaults" }
         "${settings.activeModel.ifBlank { "no model" }} · $active · streaming ${if (settings.stream) "on" else "off"}"
     }

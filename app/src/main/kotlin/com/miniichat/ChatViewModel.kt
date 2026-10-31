@@ -1401,7 +1401,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             val apiJson = provider?.let {
                 if (it.apiProtocol == com.miniichat.data.ProviderApiProtocol.RESPONSES) {
-                    client.buildResponsesRequestBody(it, current.activeModel, messages, current.stream, requestTools, RequestMetadataAdapter.parameters(it, current.activeModel, current))
+                    client.buildResponsesRequestBody(
+                        it, current.activeModel, messages, current.stream, requestTools,
+                        requestMetadata = RequestMetadataAdapter.parameters(it, current.activeModel, current),
+                        globalMetadata = current.metadataParameters
+                    )
                 } else {
                     client.buildRequestBody(
                         provider = it,
@@ -1411,6 +1415,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         temperature = current.temperature,
                         tools = requestTools,
                         requestMetadata = RequestMetadataAdapter.parameters(it, current.activeModel, current),
+                        globalMetadata = current.metadataParameters,
                         conversationId = storedConversation?.id
                     )
                 }

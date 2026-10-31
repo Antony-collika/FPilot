@@ -1,75 +1,57 @@
 package com.miniichat.data
 
-import java.net.URI
-
-/** Conservative provider/model capability map for Request Control Panel metadata. */
+/**
+ * Maps the four common Request Control Panel controls to native request fields.
+ * Provider-specific and arbitrary settings are configured separately in the JSON editors.
+ */
 object RequestMetadataAdapter {
-    private fun isReasoningModel(model: String): Boolean {
-        val id = model.lowercase()
-        return id.startsWith("o1") || id.startsWith("o3") || id.startsWith("o4") ||
-            id.startsWith("gpt-5") || id.contains("deepseek-reasoner")
+    fun supportedOptions(provider: ProviderConfig, model: String): Set<String> =
+        setOf("temperature", "top_p", "max_output_tokens", "reasoning_effort")
+
+    private fun maySend(provider: ProviderConfig, model: String, key: String, settings: AppSettings): Boolean {
+        val status = ProviderCapabilityRegistry.capability(provider, model, key).status
+        return status == CapabilityStatus.SUPPORTED || settings.allowUnverifiedMetadata
     }
 
-    fun supportedOptions(provider: ProviderConfig, model: String): Set<String> {
-        if (model.isBlank()) return emptySet()
-        val name = provider.name.lowercase()
-        val knownChat = listOf("openai", "openrouter", "deepseek", "groq", "mistral", "together", "gemini", "siliconflow", "ollama", "lm studio")
-            .any { name.contains(it) }
-        val officialOpenAI = runCatching { URI(provider.baseUrl).host.equals("api.openai.com", ignoreCase = true) }
-            .getOrDefault(false)
-        return when (provider.apiProtocol) {
-            ProviderApiProtocol.CHAT_COMPLETIONS -> if (!knownChat) emptySet() else buildSet {
-                if (!isReasoningModel(model)) {
-                    add("temperature")
-                    add("top_p")
-                }
-                add("max_output_tokens")
-                if (officialOpenAI && isReasoningModel(model)) add("reasoning_effort")
-            }
-            ProviderApiProtocol.RESPONSES -> if (!officialOpenAI) emptySet() else buildSet {
-                if (!isReasoningModel(model)) {
-                    add("temperature")
-                    add("top_p")
-                }
-                add("max_output_tokens")
-                if (isReasoningModel(model)) add("reasoning_effort")
-            }
-            else -> emptySet()
+    private fun maxTokensKey(provider: ProviderConfig): String =
+        if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) {
+            "max_output_tokens"
+        } else if (ProviderKinds.resolve(provider) == ProviderKinds.OPENAI) {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
         }
-    }
 
-    fun parameters(provider: ProviderConfig, model: String, settings: AppSettings): Map<String, String> {
-        val supported = supportedOptions(provider, model)
-        val result = linkedMapOf(
-            "temperature" to "@omit",
-            "top_p" to "@omit",
-            "max_tokens" to "@omit",
-            "max_completion_tokens" to "@omit",
-            "max_output_tokens" to "@omit",
-            "reasoning_effort" to "@omit",
-            "reasoning" to "@omit",
-            "thinking" to "@omit"
-        )
-        if ("temperature" in supported && settings.temperatureEnabled) {
-            result["temperature"] = settings.temperature.coerceIn(0f, 2f).toString()
-        }
-        if ("top_p" in supported && settings.topPEnabled) {
-            result["top_p"] = settings.topP.coerceIn(0f, 1f).toString()
-        }
-        if ("max_output_tokens" in supported && settings.maxOutputTokensEnabled) {
-            val key = if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) "max_output_tokens"
-            else if (provider.name.contains("openai", true) || provider.name.contains("groq", true)) "max_completion_tokens"
-            else "max_tokens"
-            result[key] = settings.maxOutputTokens.coerceIn(1, 16_384).toString()
-        }
-        if ("reasoning_effort" in supported && settings.reasoningEnabled) {
-            val level = settings.reasoningEffort.takeIf { it in setOf("low", "medium", "high") } ?: "medium"
-            if (provider.apiProtocol == ProviderApiProtocol.CHAT_COMPLETIONS) {
-                result["reasoning_effort"] = "\"$level\""
-            } else {
-                result["reasoning"] = "{\"effort\":\"$level\"}"
+    private fun reasoningKey(provider: ProviderConfig): String =
+        if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) "reasoning.effort"
+        else if (ProviderKinds.resolve(provider) == ProviderKinds.OPENROUTER) "reasoning"
+        else "reasoning_effort"
+
+    fun parameters(provider: ProviderConfig, model: String, settings: AppSettings): Map<String, String> =
+        buildMap {
+            if (settings.temperatureEnabled && maySend(provider, model, "temperature", settings)) {
+                put("temperature", settings.temperature.coerceIn(0f, 2f).toString())
+            }
+            if (settings.topPEnabled && maySend(provider, model, "top_p", settings)) {
+                put("top_p", settings.topP.coerceIn(0.0001f, 1f).toString())
+            }
+            val tokenKey = maxTokensKey(provider)
+            if (settings.maxOutputTokensEnabled && maySend(provider, model, tokenKey, settings)) {
+                put(tokenKey, settings.maxOutputTokens.coerceIn(1, 1_000_000).toString())
+            }
+            val reasonKey = reasoningKey(provider)
+            if (settings.reasoningEnabled && maySend(provider, model, reasonKey, settings)) {
+                val effort = settings.reasoningEffort.takeIf { it in setOf("none", "minimal", "low", "medium", "high", "xhigh", "max") } ?: "medium"
+                put(reasonKey, if (reasonKey == "reasoning") "{\"effort\":\"$effort\"}" else "\"$effort\"")
             }
         }
-        return result
+
+    fun capabilitySummary(provider: ProviderConfig, model: String, logicalOption: String): ProviderParameterCapability {
+        val wireKey = when (logicalOption) {
+            "max_output_tokens" -> maxTokensKey(provider)
+            "reasoning_effort" -> reasoningKey(provider)
+            else -> logicalOption
+        }
+        return ProviderCapabilityRegistry.capability(provider, model, wireKey)
     }
 }

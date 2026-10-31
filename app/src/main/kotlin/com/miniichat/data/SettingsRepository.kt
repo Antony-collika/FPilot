@@ -56,7 +56,11 @@ data class AppSettings(
     val skillsText: String = "",
     val skillsFileUri: String = "",
     val skillsFileName: String = "",
-    val agentMaxFileReadKb: Int = 32
+    val agentMaxFileReadKb: Int = 32,
+    /** Global metadata JSON literals; provider and model overrides take precedence. */
+    val metadataParameters: Map<String, String> = emptyMap(),
+    /** Permit common controls even when the provider capability is unverified. */
+    val allowUnverifiedMetadata: Boolean = false
 )
 
 class SettingsRepository(private val context: Context) {
@@ -73,6 +77,8 @@ class SettingsRepository(private val context: Context) {
         val REASONING_EFFORT = stringPreferencesKey("metadata_reasoning_effort")
         val REASONING_ENABLED = booleanPreferencesKey("metadata_reasoning_enabled")
         val STREAM = booleanPreferencesKey("stream")
+        val METADATA_PARAMETERS = stringPreferencesKey("metadata_parameters_json")
+        val ALLOW_UNVERIFIED_METADATA = booleanPreferencesKey("allow_unverified_metadata")
         val LANG = stringPreferencesKey("language")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val THEME = stringPreferencesKey("theme_mode")
@@ -118,7 +124,7 @@ class SettingsRepository(private val context: Context) {
         topPEnabled = p[Keys.TOP_P_ENABLED] ?: false,
         maxOutputTokens = (p[Keys.MAX_OUTPUT_TOKENS] ?: 2048).coerceIn(1, 1_000_000),
         maxOutputTokensEnabled = p[Keys.MAX_OUTPUT_TOKENS_ENABLED] ?: false,
-        reasoningEffort = (p[Keys.REASONING_EFFORT] ?: "medium").takeIf { it in setOf("low", "medium", "high") } ?: "medium",
+        reasoningEffort = (p[Keys.REASONING_EFFORT] ?: "medium").takeIf { it in setOf("none", "minimal", "low", "medium", "high", "xhigh", "max") } ?: "medium",
         reasoningEnabled = p[Keys.REASONING_ENABLED] ?: false,
         stream = p[Keys.STREAM] ?: true,
         language = p[Keys.LANG] ?: "system",
@@ -132,6 +138,10 @@ class SettingsRepository(private val context: Context) {
         allowWorkspaceEdit = p[Keys.ALLOW_WORKSPACE_EDIT] ?: true,
         agentMaxToolRounds = (p[Keys.AGENT_MAX_TOOL_ROUNDS] ?: 8).coerceIn(1, 20),
         agentMaxFileReadKb = (p[Keys.AGENT_MAX_FILE_READ_KB] ?: ((p[Keys.LEGACY_AGENT_MAX_FILE_READ_CHARS] ?: 32_000) / 1_000)).coerceIn(8, 256),
+        metadataParameters = runCatching {
+            MetadataParameterCatalog.parseOverrides(p[Keys.METADATA_PARAMETERS] ?: "{}")
+        }.getOrDefault(emptyMap()),
+        allowUnverifiedMetadata = p[Keys.ALLOW_UNVERIFIED_METADATA] ?: false,
         agentMaxWriteChars = (p[Keys.AGENT_MAX_WRITE_CHARS] ?: 100_000).coerceIn(10_000, 100_000),
         toolPermissionMode = (p[Keys.TOOL_PERMISSION_MODE] ?: "always_ask").takeIf {
             it in setOf("always_ask", "allow_once", "always_allow")
@@ -167,9 +177,11 @@ class SettingsRepository(private val context: Context) {
             p[Keys.TOP_P_ENABLED] = next.topPEnabled
             p[Keys.MAX_OUTPUT_TOKENS] = next.maxOutputTokens.coerceIn(1, 1_000_000)
             p[Keys.MAX_OUTPUT_TOKENS_ENABLED] = next.maxOutputTokensEnabled
-            p[Keys.REASONING_EFFORT] = next.reasoningEffort.takeIf { it in setOf("low", "medium", "high") } ?: "medium"
+            p[Keys.REASONING_EFFORT] = next.reasoningEffort.takeIf { it in setOf("none", "minimal", "low", "medium", "high", "xhigh", "max") } ?: "medium"
             p[Keys.REASONING_ENABLED] = next.reasoningEnabled
             p[Keys.STREAM] = next.stream
+            p[Keys.METADATA_PARAMETERS] = MetadataParameterCatalog.formatOverrides(next.metadataParameters)
+            p[Keys.ALLOW_UNVERIFIED_METADATA] = next.allowUnverifiedMetadata
             p[Keys.LANG] = next.language
             p[Keys.DYNAMIC] = next.dynamicColor
             p[Keys.THEME] = next.themeMode
