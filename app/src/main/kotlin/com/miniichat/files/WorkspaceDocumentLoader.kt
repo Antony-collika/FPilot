@@ -3,6 +3,7 @@ package com.miniichat.files
 data class WorkspaceDocuments(
     val systemFileUri: String? = null,
     val memoryFileUri: String? = null,
+    val toolsFileUri: String? = null,
     val skillCatalog: String? = null,
     val saveRequestSnapshots: Boolean = false
 )
@@ -39,9 +40,19 @@ class WorkspaceDocumentLoader(
             files.existingFileUri(".fpilot/memory.md")
         } else null
 
+        val toolsUri = if (enabled("include_workspace_tools", true)) {
+            files.existingFileUri(".fpilot/tools/workspace.md")
+        } else null
+
         val skillCatalog = if (enabled("include_skills", true)) {
-            val skills = files.list(".fpilot/skills")
-                .asSequence()
+            val entries = try {
+                files.list(".fpilot/skills")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val skills = entries.asSequence()
                 .filter { !it.isDirectory && (it.name.endsWith(".md", true) || it.name.endsWith(".markdown", true)) }
                 .sortedBy { it.name.lowercase() }
                 .take(100)
@@ -54,6 +65,6 @@ class WorkspaceDocumentLoader(
             }.trimEnd()
         } else null
 
-        return WorkspaceDocuments(systemUri, memoryUri, skillCatalog, enabled("save_request_snapshots", false))
+        return WorkspaceDocuments(systemUri, memoryUri, toolsUri, skillCatalog, enabled("save_request_snapshots", false))
     }
 }
