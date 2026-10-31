@@ -850,6 +850,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             maxToolRounds = current.agentMaxToolRounds,
                             confirmToolCall = { call, arguments ->
                                 confirmToolCall(call, arguments, permissionSession, repository)
+                            },
+                            onToolProgress = { progress ->
+                                val status = when (progress.phase) {
+                                    com.miniichat.agent.ToolProgress.Phase.STARTED ->
+                                        "Running tool ${progress.position}/${progress.total}: ${progress.toolName}"
+                                    com.miniichat.agent.ToolProgress.Phase.COMPLETED ->
+                                        "Completed ${progress.toolName} (${progress.resultCharacters} characters returned)"
+                                    com.miniichat.agent.ToolProgress.Phase.NOT_EXECUTED ->
+                                        "Not executed: ${progress.toolName}"
+                                }
+                                _streamingOverlay.value = assistantId to status
                             }
                         )
                         toolNameToUid = toolsSetup.nameToUid
