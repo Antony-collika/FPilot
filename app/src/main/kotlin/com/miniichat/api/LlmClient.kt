@@ -459,8 +459,9 @@ class LlmClient {
         tools: List<ToolDefinition>,
         conversationId: String? = null
     ): ChatMessage {
+        val requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings)
         if (provider.apiProtocol == ProviderApiProtocol.RESPONSES) {
-            return completeResponsesTurn(provider, modelId, messages, tools)
+            return completeResponsesTurn(provider, modelId, messages, tools, requestMetadata)
         }
         val bodyText = buildRequestBody(
             provider = provider,
@@ -469,7 +470,8 @@ class LlmClient {
             stream = false,
             temperature = settings.temperature,
             tools = tools,
-            conversationId = conversationId
+            conversationId = conversationId,
+            requestMetadata = requestMetadata
         )
         recordRequestBody(bodyText)
         val response = client.preparePost(chatEndpoint(provider.baseUrl)) {
@@ -501,9 +503,12 @@ class LlmClient {
         provider: ProviderConfig,
         modelId: String,
         messages: List<ChatMessage>,
-        tools: List<ToolDefinition>
+        tools: List<ToolDefinition>,
+        requestMetadata: Map<String, String>
     ): ChatMessage {
-        val bodyText = buildResponsesRequestBody(provider, modelId, messages, stream = false, tools = tools)
+        val bodyText = buildResponsesRequestBody(
+            provider, modelId, messages, stream = false, tools = tools, requestMetadata = requestMetadata
+        )
         recordRequestBody(bodyText)
         val response = client.preparePost(responsesEndpoint(provider.baseUrl)) {
             contentType(ContentType.Application.Json)
