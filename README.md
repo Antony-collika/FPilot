@@ -49,6 +49,8 @@ The current `config.md` switches are:
 | `include_workspace_tools` | `true` | Load editable tool names/descriptions from `.fpilot/tools/workspace.md`. Tool parameter schemas remain defined by the application. |
 | `save_request_snapshots` | `false` | Save the compiled request and effective tool schemas under `.fpilot/requests/`. Enable only when you want a persistent copy of potentially sensitive prompts. |
 
+When the selected **Storage folder** is the same folder as the initialized workspace, file-backed sessions use `.fpilot/sessions/`. Existing sessions under the older `sessions/` directory remain readable in place and are not moved. When Storage points to a different folder, its existing `sessions/` subfolder remains the session location.
+
 The existing **Request Control Panel** remains the authoritative ordering interface. `.fpilot/request-layout.md` documents the default order; it is not yet parsed as an executable layout file.
 
 ### Safety and limits
