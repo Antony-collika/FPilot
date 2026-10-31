@@ -409,7 +409,8 @@ fun AppRoot(vm: ChatViewModel) {
                         screen = Screen.CardEdit
                     },
                     makePreview = { vm.previewRequest() },
-                    onReset = { vm.resetLayout() }
+                    onReset = { vm.resetLayout() },
+                    onInitializeWorkspace = { vm.initializeWorkspaceDocuments() }
                 )
             }
             Screen.CardEdit -> {
