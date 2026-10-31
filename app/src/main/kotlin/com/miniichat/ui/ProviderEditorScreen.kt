@@ -292,7 +292,7 @@ fun ProviderEditorScreen(
                     onChange = { modelMetadataRows = it.toMutableList() }
                 )
                 Text(
-                    "Use @omit as a value to suppress a default field. Leave parameters absent to let the provider apply its own defaults. Model capability discovery is not standardized across compatible APIs, so verify support for the selected model.",
+                    "Use @omit as a value to suppress an application-supplied default such as Chat Completions temperature. Leave parameters absent to let the provider apply its own defaults. Model capability discovery is not standardized across compatible APIs, so verify support for the selected model.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

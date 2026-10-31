@@ -243,10 +243,11 @@ class LlmClient {
                 })
             }
         }
+        val metadata = resolvedMetadataParameters(provider, modelId)
         val obj = buildJsonObject {
             put("model", modelId)
             put("stream", stream)
-            put("temperature", temperature)
+            if (metadata["temperature"] != "@omit") put("temperature", temperature)
             put("messages", msgsJson)
             mistralPromptCacheKey(provider, conversationId)?.let {
                 put("prompt_cache_key", it)
@@ -267,9 +268,8 @@ class LlmClient {
                 put("tool_choice", "auto")
             }
             // Metadata overrides are provider-scoped and only emitted when explicitly configured.
-            for ((k, v) in resolvedMetadataParameters(provider, modelId)) {
-                if (k.isBlank()) continue
-                if (v == "@omit") { remove(k); continue }
+            for ((k, v) in metadata) {
+                if (k.isBlank() || v == "@omit") continue
                 if (v.isBlank()) continue
                 put(k, coerceToJson(v))
             }
@@ -348,6 +348,7 @@ class LlmClient {
             }
         }
 
+        val metadata = resolvedMetadataParameters(provider, modelId)
         val body = buildJsonObject {
             put("model", modelId)
             put("input", input)
@@ -368,9 +369,8 @@ class LlmClient {
                 put("tool_choice", "auto")
             }
             // Metadata overrides use the selected protocol's native JSON field names.
-            for ((key, value) in resolvedMetadataParameters(provider, modelId)) {
-                if (key.isBlank()) continue
-                if (value == "@omit") { remove(key); continue }
+            for ((key, value) in metadata) {
+                if (key.isBlank() || value == "@omit") continue
                 if (value.isBlank()) continue
                 put(key, coerceToJson(value))
             }
