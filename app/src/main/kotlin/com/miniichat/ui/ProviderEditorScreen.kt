@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.MetadataParameterCatalog
 import com.miniichat.data.ProviderPresets
 import com.miniichat.util.BaseUrlNormalizer
 import com.miniichat.util.newId
@@ -89,9 +90,15 @@ fun ProviderEditorScreen(
             initial?.metadataParameters?.map { it.key to it.value } ?: emptyList()
         )
     }
+    var metadataRows by remember(initial?.id) {
+        mutableStateOf<List<Pair<String, String>>>(
+            initial?.metadataParameters?.map { it.key to it.value } ?: emptyList()
+        )
+    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
-            || (initial?.extraBody?.isNotEmpty() == true))
+            || (initial?.extraBody?.isNotEmpty() == true)
+            || (initial?.metadataParameters?.isNotEmpty() == true))
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
 
@@ -142,6 +149,8 @@ fun ProviderEditorScreen(
                         customHeaders = headers,
                         extraBody = body,
                         apiProtocol = apiProtocol,
+                        metadataParameters = metadataRows.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() },
                         metadataParameters = metadataRows.filter { it.first.isNotBlank() }
                             .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() }
                     )
@@ -261,6 +270,17 @@ fun ProviderEditorScreen(
                 )
                 Text(
                     "Common fields: temperature, top_p, max_tokens, max_completion_tokens, max_output_tokens, seed, reasoning_effort, reasoning, thinking, response_format, stop, parallel_tool_calls, service_tier, store, truncation, verbosity. Exact support depends on provider, API protocol, and model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                KeyValueEditor(
+                    title = "API metadata parameters",
+                    hint = "Per-provider request fields. Enter JSON values such as 0.4, true, \"high\", or {\"effort\":\"high\"}. Leave a key empty to omit it. Unsupported fields may be rejected by the selected model.",
+                    rows = metadataRows,
+                    onChange = { metadataRows = it.toMutableList() }
+                )
+                Text(
+                    "Common fields for this protocol: " + MetadataParameterCatalog.forProtocol(apiProtocol).joinToString { it.key } + ". Exact support still depends on provider and model.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
