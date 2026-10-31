@@ -42,6 +42,7 @@ object MetadataValidator {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "Value must be a valid JSON literal."))
                 return@forEach
             }
+            if ((value as? JsonPrimitive)?.let { it.isString && it.content in setOf("@omit", "@disabled") } == true) return@forEach
             val definition = MetadataParameterCatalog.definition(key)
             if (definition == null) {
                 add(MetadataValidationIssue(
