@@ -12,7 +12,7 @@ class MetadataValidatorTest {
                 "temperature" to "0.7",
                 "max_completion_tokens" to "2048",
                 "response_format" to """{"type":"json_object"}""",
-                "reasoning.effort" to "\"high\""
+                "reasoning" to """{"effort":"high"}"""
             ),
             ProviderApiProtocol.CHAT_COMPLETIONS
         )
