@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.files.SafFileRepository
+import com.miniichat.files.ExactTextDiff
 
 @Composable
 fun WorkspaceBrowserScreen(
@@ -223,11 +224,26 @@ fun WorkspaceBrowserScreen(
             onDismissRequest = { showSaveConfirmation = false },
             title = { Text("Save workspace document?") },
             text = {
-                Text(
-                    "Replace the current contents of ${editorPath.orEmpty()} with the edited text? " +
-                        "FPilot will re-read the document first and reject the save if it changed since it was opened. " +
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        "Review the proposed changes to ${editorPath.orEmpty()}. FPilot will re-read the document first and reject the save if it changed since it was opened."
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        ExactTextDiff.render(originalContent, draft, maxOutputChars = 4_000),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
                         "This direct edit is a user action and does not require enabling agent write tools."
-                )
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
