@@ -3,7 +3,8 @@ package com.miniichat.files
 data class WorkspaceDocuments(
     val systemFileUri: String? = null,
     val memoryFileUri: String? = null,
-    val skillCatalog: String? = null
+    val skillCatalog: String? = null,
+    val saveRequestSnapshots: Boolean = false
 )
 
 /**
@@ -14,7 +15,7 @@ class WorkspaceDocumentLoader(
     private val files: SafFileRepository
 ) {
     suspend fun load(): WorkspaceDocuments {
-        val configUri = files.existingFileUri(".fpilot/config.md") ?: return WorkspaceDocuments()
+        if (files.existingFileUri(".fpilot/config.md") == null) return WorkspaceDocuments()
         val configText = files.readText(".fpilot/config.md")
         val settings = configText.lineSequence()
             .mapNotNull { line ->
@@ -53,6 +54,6 @@ class WorkspaceDocumentLoader(
             }.trimEnd()
         } else null
 
-        return WorkspaceDocuments(systemUri, memoryUri, skillCatalog)
+        return WorkspaceDocuments(systemUri, memoryUri, skillCatalog, enabled("save_request_snapshots", false))
     }
 }
