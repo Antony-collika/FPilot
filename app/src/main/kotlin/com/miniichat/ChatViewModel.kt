@@ -1442,8 +1442,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * If the answer contains a memory patch block, applies it to the Memory file and returns
      * the answer without the block. If anything is wrong, the file is left untouched.
      */
-    private suspend fun confirmMemoryPatch(patch: String): Boolean {
-        if (patch.length > 4_000) {
+    private suspend fun confirmMemoryPatch(original: String, updated: String): Boolean {
+        val diff = ExactTextDiff.render(original, updated, maxOutputChars = 12_000)
+        if (diff.contains("[Diff preview truncated.]") ||
+            diff.contains("[Detailed diff omitted")
+        ) {
             _error.value = "The proposed memory change is too large to review completely. Ask for a smaller update; no memory was changed."
             return false
         }
@@ -1452,7 +1455,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _pendingToolApproval.value = ToolApprovalRequest(
             toolName = "memory_update",
             path = "memory.md",
-            summary = "Review this proposed change before it is written:\n\n" + patch
+            summary = "Review the complete proposed Memory file diff before it is written:\\n" + diff
         )
         return try {
             deferred.await()
@@ -1481,7 +1484,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 currentText to MemoryDoc.parse(currentText).applyPatch(patch).render()
             }
             if (updated == original) return split.visible
-            if (!confirmMemoryPatch(patch)) {
+            if (!confirmMemoryPatch(original, updated)) {
                 _toast.value = "Memory update rejected; the file was not changed."
                 return split.visible
             }
