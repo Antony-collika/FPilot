@@ -550,19 +550,34 @@ fun AppRoot(vm: ChatViewModel) {
     }
 
     pendingToolApproval?.let { request ->
+        val memoryChange = request.toolName == "memory_update"
         AlertDialog(
             onDismissRequest = { vm.respondToToolApproval(false) },
-            title = { Text("Confirm tool call") },
+            title = { Text(if (memoryChange) "Approve memory change" else "Confirm tool call") },
             text = {
                 androidx.compose.foundation.layout.Column {
-                    Text("Agent wants to execute the ${request.toolName} tool with:")
+                    Text(
+                        if (memoryChange) "The assistant proposes updating long-term memory:"
+                        else "Agent wants to execute the ${request.toolName} tool with:"
+                    )
                     Text(request.path, style = MaterialTheme.typography.titleSmall)
                     Text(request.summary)
-                    Text("Allow only if this tool call is expected. Write tools must be enabled in Tool permissions and stay within the allowed write scope.")
+                    Text(
+                        if (memoryChange) "The memory file will be re-read before writing. If it changed since this preview, the update will be rejected."
+                        else "Allow only if this tool call is expected. Write tools must be enabled in Tool permissions and stay within the allowed write scope."
+                    )
                 }
             },
-            confirmButton = { TextButton(onClick = { vm.respondToToolApproval(true) }) { Text("Allow") } },
-            dismissButton = { TextButton(onClick = { vm.respondToToolApproval(false) }) { Text("Deny") } }
+            confirmButton = {
+                TextButton(onClick = { vm.respondToToolApproval(true) }) {
+                    Text(if (memoryChange) "Apply change" else "Allow")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.respondToToolApproval(false) }) {
+                    Text(if (memoryChange) "Reject" else "Deny")
+                }
+            }
         )
     }
     error?.let { msg ->
