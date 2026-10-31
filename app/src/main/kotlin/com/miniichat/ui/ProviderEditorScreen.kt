@@ -108,7 +108,7 @@ fun ProviderEditorScreen(
 )
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
-    val metadataIssues = remember(metadataRows, modelMetadataRows, bodyRows, apiProtocol) {
+    val metadataIssues = remember(metadataRows, modelMetadataRows, bodyRows, capabilityRows, apiProtocol) {
         buildList {
             addAll(MetadataValidator.validate(
                 metadataRows.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second.trim() },
@@ -129,6 +129,14 @@ fun ProviderEditorScreen(
                     addAll(MetadataValidator.validate(parsed.getOrThrow(), apiProtocol).map { issue ->
                         issue.copy(key = "$modelId.${issue.key}")
                     })
+                }
+            }
+            capabilityRows.filter { it.first.isNotBlank() }.forEach { (key, value) ->
+                if (value.trim().lowercase() !in setOf("supported", "conditional", "unsupported", "unknown")) {
+                    add(com.miniichat.data.MetadataValidationIssue(
+                        key, MetadataIssueLevel.ERROR,
+                        "Capability status must be supported, conditional, unsupported, or unknown."
+                    ))
                 }
             }
         }
