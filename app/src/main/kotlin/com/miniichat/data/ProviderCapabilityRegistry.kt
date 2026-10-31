@@ -95,6 +95,16 @@ object ProviderCapabilityRegistry {
     fun capability(provider: ProviderConfig, model: String, parameterKey: String): ProviderParameterCapability {
         val kind = ProviderKinds.resolve(provider)
         val docs = documentation[kind]?.get(provider.apiProtocol)
+        provider.metadataCapabilityOverrides[parameterKey]?.let { declared ->
+            val status = runCatching { CapabilityStatus.valueOf(declared.trim().uppercase()) }
+                .getOrDefault(CapabilityStatus.UNKNOWN)
+            return ProviderParameterCapability(
+                parameterKey = parameterKey,
+                status = status,
+                sourceUrl = docs,
+                explanation = "Capability status explicitly declared in this provider configuration."
+            )
+        }
         val supported = documentedFields[kind]?.get(provider.apiProtocol).orEmpty()
         if (parameterKey in supported) {
             val modelCondition = when {
