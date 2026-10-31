@@ -1,54 +1,86 @@
 # FPilot
 
-FPilot is an Android AI chat app built with Kotlin and Jetpack Compose. It connects to OpenAI-compatible language-model APIs and adds an experimental agent workflow for exploring and editing Markdown files in a folder you choose on your device.
+FPilot is a native Android AI workspace built with Kotlin and Jetpack Compose. It combines streaming chat with a folder-scoped agent that can inspect and, with explicit permission, edit Markdown files on the device.
 
-The app runs locally on Android and does not require a FPilot backend. You bring your own provider endpoint and API key.
+FPilot runs locally on Android and does not require a FPilot backend. You configure the model endpoint and provide your own API key.
 
-## Highlights
+## What it does
 
-- **OpenAI-compatible providers** — configure a base URL, API key, and model for compatible hosted or local endpoints.
-- **Streaming chat** — ordinary conversations stream responses to the chat UI.
-- **Agentic Markdown workspace (experimental)** — choose a folder using Android's system folder picker. The agent can list files, search file names and Markdown contents, inspect file information, and read relevant files as needed.
-- **Opt-in file edits** — file creation and exact-match edits are disabled by default. Enable **Allow file modifications** in Settings to expose those tools to the agent. The app does not currently provide a delete-file tool.
-- **Bounded tool loop** — the model can request tools, inspect their results, and make further tool calls within a configured round limit. Tool calling depends on the selected model/provider supporting the OpenAI-compatible tools format.
-- **Scoped storage access** — workspace operations use Android's Storage Access Framework and operate relative to the selected folder.
-- **Markdown-friendly workflow** — intended for folders of notes and documents, including projects that use Markdown links and instruction files. The agent should read only the relevant context instead of sending the entire folder to the model.
-- **Local app preferences and conversations** — settings and chat data are stored on-device.
+- **OpenAI-compatible providers** — configure hosted or local endpoints, model IDs, headers, and provider-specific request parameters.
+- **Streaming chat and bounded agent loop** — assistant text and tool progress are displayed separately; the tool loop is limited to a configured number of rounds.
+- **Workspace access through Android SAF** — the agent operates relative to a folder you select. It does not receive arbitrary filesystem access.
+- **Search and inspect** — list files, search filenames and Markdown content, read bounded file sections, and inspect file metadata.
+- **Controlled Markdown writes** — create and exact-match edit are disabled until enabled in Settings. Every write requires a fresh confirmation, even when read-only tools are set to “always allow”. Writes are scoped to the configured subfolder, bounded by size limits, checked against the original content, and read back for verification.
+- **Glassbox request control** — inspect the compiled messages, the card each message came from, source locations, SHA-256 digests, and effective tool schemas before sending.
+- **Editable Markdown history** — file-backed sessions use `history.md` for visible conversation text and `history.meta.json` for message IDs, attachments, provider metadata, and tool rounds. Direct edits are detected by content digest and marked in the UI.
+- **Local data** — provider settings and non-file-backed conversations stay on-device.
 
-## Agent workspace setup
+## Set up a workspace
 
-1. Open **Settings → Agent workspace**.
-2. Choose the folder containing your Markdown notes or documents.
-3. Start a chat and ask the model to find, read, or summarize relevant files.
-4. To permit file creation or edits, explicitly enable **Allow file modifications**. It is off by default.
-5. Review important changes in your normal Markdown editor. The agent's edit tool uses an exact-match target and attempts to read back the result for verification.
+1. Open **Settings → Agent workspace** and choose a folder.
+2. Open **Request Control Panel** and choose **Initialize Glassbox workspace documents**. Initialization is explicit and non-destructive: existing files are preserved.
+3. Review and edit the generated `.fpilot/` Markdown files in your preferred editor.
+4. In **Settings → Agent workspace**, enable file creation/editing only for folders where writes are appropriate.
+5. Start a chat. Use **Preview the next request** in the Request Control Panel to inspect the actual assembled messages and tool schemas.
 
-**Current limitations:** this feature is experimental. Tool-call behavior varies by model and provider; the agent workflow is not streamed round-by-round; there is no delete tool or per-edit approval dialog yet. Always review important changes. Avoid enabling writes for folders where the agent should only read.
+The initializer creates this structure:
 
-## Provider configuration
+```text
+<selected-folder>/
+  .fpilot/
+    config.md
+    system.md
+    request-layout.md
+    memory.md
+    tools/
+      workspace.md
+    skills/
+    sessions/
+    requests/
+```
+
+The current `config.md` switches are:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `include_system` | `true` | Include `.fpilot/system.md` as workspace instructions. |
+| `include_memory` | `false` | Include `.fpilot/memory.md` as durable context. |
+| `include_skills` | `true` | Show the names of skills in `.fpilot/skills/`; skill content is read on demand. |
+| `include_workspace_tools` | `true` | Load editable tool names/descriptions from `.fpilot/tools/workspace.md`. Tool parameter schemas remain defined by the application. |
+| `save_request_snapshots` | `false` | Save the compiled request and effective tool schemas under `.fpilot/requests/`. Enable only when you want a persistent copy of potentially sensitive prompts. |
+
+The existing **Request Control Panel** remains the authoritative ordering interface. `.fpilot/request-layout.md` documents the default order; it is not yet parsed as an executable layout file.
+
+### Safety and limits
+
+Workspace files are untrusted content, not trusted system instructions. Missing or malformed documents should fail safely. API keys and authorization headers are not written to workspace files or request snapshots.
+
+Memory updates returned by the assistant are shown for approval before writing. A memory file that changed after the proposal was prepared is not overwritten. Editing a transcript changes conversation text only; it does not replay previously recorded tool calls.
+
+There is no file-delete tool. SAF providers do not expose a portable compare-and-swap operation, so stale content is checked immediately before writing, but edits made outside FPilot at exactly the same instant cannot be protected by a filesystem-wide transaction.
+
+## Configure a model provider
 
 1. Open **Settings → Providers**.
-2. Add a provider, choose a preset or configure a custom OpenAI-compatible endpoint, and enter your API key.
-3. Fetch available models or enter a model ID manually.
+2. Add a preset or configure a custom OpenAI-compatible endpoint.
+3. Enter the API key and fetch models, or enter a model ID manually.
 4. Select the model from the chat screen.
 
-Examples of compatible base URLs:
+Examples:
 
 | Provider | Base URL | Example model |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | OpenRouter | `https://openrouter.ai/api/v1` | Provider-specific model ID |
 | DeepSeek | `https://api.deepseek.com/v1` | Provider-specific model ID |
-| Ollama | `http://<host>:11434/v1` | A model installed locally |
-| LM Studio | `http://<host>:1234/v1` | The currently loaded model |
+| Ollama | `http://<host>:11434/v1` | Locally installed model |
+| LM Studio | `http://<host>:1234/v1` | Currently loaded model |
 
-For Ollama or LM Studio on a physical Android device, use your computer's LAN IP address rather than the emulator-only address.
+The current generation adapter implements the OpenAI-compatible protocol, including its tool-call format. Native Anthropic and native Gemini adapters are not part of this milestone; those endpoints need an OpenAI-compatible shim to work here. Provider capabilities are exposed through an application-owned runtime interface so additional adapters can be added without changing the agent loop.
 
 ## Build
 
-The repository includes a GitHub Actions workflow intended to run unit tests and build debug and release APKs on pushes to `main` and `agent-fs`, and on pull requests targeting `main`.
-
-Requirements for a local build: JDK 17 and Android SDK.
+Requirements: JDK 17 and Android SDK.
 
 ```bash
 ./gradlew :app:testDebugUnitTest
@@ -56,18 +88,20 @@ Requirements for a local build: JDK 17 and Android SDK.
 ./gradlew :app:assembleRelease
 ```
 
-Debug and release APKs are uploaded as workflow artifacts when the workflow completes successfully. A successful build has not been verified for every commit on the experimental `agent-fs` branch; check the Actions run for the exact commit before installing or distributing an APK.
+The GitHub Actions workflow runs unit tests and builds a release APK for the configured push and pull-request events. CI creates a temporary signing key for its artifact. Such an APK is not signed with your permanent release key and should not be treated as a continuity key for future app updates.
 
-## Project structure
+For locally signed releases, provide all four values through Gradle properties or environment variables:
 
-```
-app/src/main/kotlin/com/miniichat/
-├── api/        # OpenAI-compatible API client and tool-call protocol
-├── agent/      # Agent loop and tool registry
-├── files/      # SAF workspace access and Markdown file tools
-├── data/       # Settings and persisted chat data
-└── ui/         # Compose chat, provider, and settings screens
-```
+- `RELEASE_STORE_FILE` — path relative to the `app/` module.
+- `RELEASE_STORE_PASSWORD`
+- `RELEASE_KEY_ALIAS`
+- `RELEASE_KEY_PASSWORD`
+
+When these are absent, the local release variant falls back to debug signing. Never commit a keystore or passwords to this repository.
+
+## Implementation and licensing notes
+
+FPilot's runtime contract and workspace features are implemented in this repository. APilot was reviewed as an architectural reference, but its GPL-3.0 code has not been copied into this MIT-licensed project. Any future code-level port requires an explicit license decision and attribution review.
 
 ## License
 
