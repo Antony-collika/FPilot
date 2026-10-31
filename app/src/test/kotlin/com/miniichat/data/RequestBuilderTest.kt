@@ -152,4 +152,46 @@ class RequestBuilderTest {
         )
         assertNull(layoutFromSettings(settings).validationError())
     }
+
+    @Test
+    fun compiledSnapshotTracksMessageSourcesAndStableDigests() = runBlocking {
+        val cards = layout(
+            metadata,
+            RequestCard(id = "s", role = CardRole.SYSTEM, text = "You are an assistant."),
+            history,
+            lastTurn
+        )
+        val builder = builder()
+        val first = builder.compile(cards, conversation)
+        val second = builder.compile(cards, conversation)
+
+        assertEquals(first.messages, second.messages)
+        assertEquals(first.fingerprint, second.fingerprint)
+        assertEquals(first.messages.size, first.parts.size)
+        assertTrue(first.parts.first().sourceKind == "inline_card")
+        assertEquals("system", first.parts.first().role)
+        assertTrue(first.parts.first().contentSha256.matches(Regex("[0-9a-f]{64}")))
+        assertTrue(first.parts.any { it.sourceKind == "conversation_message" && it.messageId == "1" })
+    }
+
+    @Test
+    fun compiledSnapshotFingerprintChangesWhenIncludedContentChanges() = runBlocking {
+        val firstLayout = layout(
+            metadata,
+            RequestCard(id = "s", role = CardRole.SYSTEM, text = "Prompt A"),
+            history,
+            lastTurn
+        )
+        val secondLayout = layout(
+            metadata,
+            RequestCard(id = "s", role = CardRole.SYSTEM, text = "Prompt B"),
+            history,
+            lastTurn
+        )
+        val first = builder().compile(firstLayout, conversation)
+        val second = builder().compile(secondLayout, conversation)
+
+        assertTrue(first.fingerprint != second.fingerprint)
+        assertTrue(first.parts.first().contentSha256 != second.parts.first().contentSha256)
+    }
 }
