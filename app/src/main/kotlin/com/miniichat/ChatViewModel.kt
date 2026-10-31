@@ -1171,7 +1171,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (isBusy()) { onComplete(false); return }
         val convId = _activeId.value ?: run { onComplete(false); return }
         persistHistoryEdit(convId, { conv ->
-            conv.copy(messages = conv.messages.map { if (it.id == messageId) it.copy(content = newContent) else it })
+            conv.copy(messages = conv.messages.map { if (it.id == messageId) it.withEditedContent(newContent) else it })
         }, onComplete)
     }
 
