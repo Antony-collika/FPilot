@@ -66,6 +66,7 @@ class RequestMetadataAdapterTest {
         val settings = AppSettings(
             maxOutputTokens = 8192,
             maxOutputTokensEnabled = true,
+            temperatureEnabled = false,
             reasoningEnabled = true,
             reasoningEffort = "high",
             allowUnverifiedMetadata = true
