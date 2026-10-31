@@ -32,13 +32,27 @@ class FileSessionStore(
             val rootId = DocumentsContract.getTreeDocumentId(treeUri)
                 ?: throw IOException("Could not open the selected Storage folder.")
             val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
-            val sessions = findOrCreateDirectory(treeUri, root, "sessions")
-            val existing = listChildren(treeUri, sessions)
-                .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
-            if (existing != null && useSidecarForNewSession) {
+            // Prefer the workspace's .fpilot/sessions folder when it was explicitly initialized.
+            // Existing legacy sessions under /sessions remain discoverable and are never moved.
+            val workspaceSessions = findWorkspaceSessionsDirectory(treeUri, root)
+            val legacySessions = findExistingDirectory(treeUri, root, "sessions")
+            val existingLocation = listOfNotNull(workspaceSessions, legacySessions)
+                .asSequence()
+                .mapNotNull { directory ->
+                    listChildren(treeUri, directory)
+                        .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
+                        ?.let { directory to it }
+                }
+                .firstOrNull()
+            if (existingLocation != null && useSidecarForNewSession) {
                 throw IOException("A session with this ID already exists.")
             }
-            val isNewSessionFolder = existing == null
+            val isNewSessionFolder = existingLocation == null
+            val sessions = existingLocation?.first
+                ?: workspaceSessions
+                ?: legacySessions
+                ?: findOrCreateDirectory(treeUri, root, "sessions")
+            val existing = existingLocation?.second
             val folder = if (existing != null) {
                 DocumentsContract.buildDocumentUriUsingTree(treeUri, existing.id)
             } else {
@@ -74,10 +88,12 @@ class FileSessionStore(
             val rootId = DocumentsContract.getTreeDocumentId(treeUri)
                 ?: return@withContext null
             val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
-            val sessions = listChildren(treeUri, root).firstOrNull {
-                it.isDirectory && it.name == "sessions"
-            } ?: return@withContext null
-            val folder = listChildren(treeUri, DocumentsContract.buildDocumentUriUsingTree(treeUri, sessions.id))
+            val sessionDirectories = listOfNotNull(
+                findWorkspaceSessionsDirectory(treeUri, root),
+                findExistingDirectory(treeUri, root, "sessions")
+            )
+            val folder = sessionDirectories.asSequence()
+                .flatMap { listChildren(treeUri, it).asSequence() }
                 .firstOrNull { it.isDirectory && it.name.endsWith("_$sessionId") }
                 ?: return@withContext null
             val folderUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, folder.id)
@@ -191,6 +207,18 @@ class FileSessionStore(
 
     override suspend fun createHistoryTemplate(uriString: String, sessionId: String, title: String) {
         writeText(uriString, HistoryMd.render(HistoryMd.empty(sessionId, title)))
+    }
+
+    /** Returns .fpilot/sessions only when the user has already created the .fpilot folder. */
+    private fun findWorkspaceSessionsDirectory(treeUri: Uri, root: Uri): Uri? {
+        val fpilot = findExistingDirectory(treeUri, root, ".fpilot") ?: return null
+        return findExistingDirectory(treeUri, fpilot, "sessions")
+    }
+
+    private fun findExistingDirectory(treeUri: Uri, parent: Uri, name: String): Uri? {
+        val child = listChildren(treeUri, parent).firstOrNull { it.name == name } ?: return null
+        if (!child.isDirectory) throw IOException("\"$name\" exists but is not a folder.")
+        return DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id)
     }
 
     private fun findOrCreateDirectory(treeUri: Uri, parent: Uri, name: String): Uri {
