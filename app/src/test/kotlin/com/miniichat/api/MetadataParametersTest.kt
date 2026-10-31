@@ -120,4 +120,19 @@ class MetadataParametersTest {
         assertTrue("temperature" !in body)
     }
 
+    @Test
+    fun invalidModelOverrideJsonFailsClearly() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "test",
+            metadataParametersByModel = mapOf("model-x" to "not-json")
+        )
+        val error = runCatching {
+            client.buildRequestBody(provider, "model-x", listOf(ChatMessage("user", "hello")), false, 0.7f)
+        }.exceptionOrNull()
+        assertTrue(error?.message?.contains("valid JSON object") == true)
+    }
+
 }

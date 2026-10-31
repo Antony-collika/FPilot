@@ -192,8 +192,11 @@ class LlmClient {
 
     private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String): Map<String, String> {
         val resolved = provider.metadataParameters.toMutableMap()
-        val modelOverrides = provider.metadataParametersByModel[modelId]
-            ?.let { raw -> runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() }
+        val modelOverrides = provider.metadataParametersByModel[modelId]?.let { raw ->
+            runCatching { json.parseToJsonElement(raw).jsonObject }.getOrElse {
+                throw IllegalArgumentException("Model-specific metadata for '$modelId' must be a valid JSON object.")
+            }
+        }
         modelOverrides?.forEach { (key, value) -> resolved[key] = value.toString() }
         return resolved
     }

@@ -158,9 +158,7 @@ fun ProviderEditorScreen(
                         metadataParameters = metadataRows.filter { it.first.isNotBlank() }
                             .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() },
                         metadataParametersByModel = modelMetadataRows.filter { it.first.isNotBlank() && it.second.isNotBlank() }
-                            .associate { it.first.trim() to it.second.trim() },
-                        metadataParameters = metadataRows.filter { it.first.isNotBlank() }
-                            .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim() }
                     )
                     onSave(p)
                 }
