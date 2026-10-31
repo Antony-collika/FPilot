@@ -81,7 +81,13 @@ class RequestBuilder(
                 sourceLocation = sourceLocation,
                 messageId = messageId,
                 role = message.role,
-                contentPreview = snapshotPreview(message),
+                contentPreview = buildString {
+                    append(snapshotPreview(message))
+                    message.toolCalls?.forEach { call ->
+                        append("\n\nTool call: ").append(call.name).append("\n")
+                        append(call.arguments)
+                    }
+                },
                 contentSha256 = sha256(exactPayload(message))
             )
         }
@@ -159,7 +165,11 @@ class RequestBuilder(
         }
 
         val immutableMessages = output.toList()
-        val fingerprint = sha256(provenance.joinToString("\n") { "${it.role}: ${it.contentSha256}" })
+        val fingerprint = sha256(
+            provenance.joinToString("\n") {
+                "${it.index}|${it.cardId}|${it.sourceKind}|${it.sourceLocation.orEmpty()}|${it.role}|${it.contentSha256}"
+            }
+        )
         return RequestSnapshot(immutableMessages, provenance.toList(), fingerprint)
     }
 
