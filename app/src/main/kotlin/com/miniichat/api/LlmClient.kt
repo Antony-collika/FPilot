@@ -277,6 +277,12 @@ class LlmClient {
     }
 
     suspend fun listModels(provider: ProviderConfig): List<String> {
+        when (provider.apiStyle) {
+            "anthropic" -> return listAnthropicModels(provider)
+            "gemini" -> return listGeminiModels(provider)
+            "openai_compatible", "" -> Unit
+            else -> throw IllegalArgumentException("Unsupported provider protocol: ${provider.apiStyle}")
+        }
         val resp = client.get(modelsEndpoint(provider.baseUrl)) {
             headers {
                 if (provider.apiKey.isNotBlank()) {
@@ -317,6 +323,12 @@ class LlmClient {
         tools: List<ToolDefinition>,
         conversationId: String? = null
     ): ChatMessage {
+        when (provider.apiStyle) {
+            "anthropic" -> return completeAnthropic(provider, settings, modelId, messages, tools)
+            "gemini" -> return completeGemini(provider, settings, modelId, messages, tools)
+            "openai_compatible", "" -> Unit
+            else -> throw IllegalArgumentException("Unsupported provider protocol: ${provider.apiStyle}")
+        }
         val bodyText = buildRequestBody(
             provider = provider,
             modelId = modelId,
@@ -352,6 +364,102 @@ class LlmClient {
         return parseCompletionResponse(response)
     }
 
+    private suspend fun completeAnthropic(
+        provider: ProviderConfig,
+        settings: AppSettings,
+        modelId: String,
+        messages: List<ChatMessage>,
+        tools: List<ToolDefinition>
+    ): ChatMessage {
+        val bodyText = NativeProviderProtocol.anthropicRequestBody(modelId, settings, messages, tools)
+        recordRequestBody(bodyText)
+        val responseText = client.preparePost("${provider.baseUrl.trimEnd('/')}/messages") {
+            contentType(ContentType.Application.Json)
+            headers {
+                if (provider.apiKey.isNotBlank()) append("x-api-key", provider.apiKey)
+                append("anthropic-version", "2023-06-01")
+                append(HttpHeaders.Accept, "application/json")
+                provider.customHeaders.forEach { (name, value) ->
+                    if (name.isNotBlank() && !name.equals("x-api-key", true)) append(name, value)
+                }
+            }
+            setBody(bodyText)
+        }.execute { response ->
+            val text = response.bodyAsText()
+            recordReceivedBody(response.status.value, text)
+            if (!response.status.isSuccess()) {
+                throw RuntimeException("Anthropic HTTP ${response.status.value}: ${text.take(500)}")
+            }
+            text
+        }
+        return NativeProviderProtocol.parseAnthropicResponse(responseText)
+    }
+
+    private suspend fun completeGemini(
+        provider: ProviderConfig,
+        settings: AppSettings,
+        modelId: String,
+        messages: List<ChatMessage>,
+        tools: List<ToolDefinition>
+    ): ChatMessage {
+        val bodyText = NativeProviderProtocol.geminiRequestBody(settings, messages, tools)
+        recordRequestBody(bodyText)
+        val model = modelId.substringAfterLast('/')
+        val key = java.net.URLEncoder.encode(provider.apiKey, "UTF-8")
+        val endpoint = "${provider.baseUrl.trimEnd('/')}/models/$model:generateContent?key=$key"
+        val responseText = client.preparePost(endpoint) {
+            contentType(ContentType.Application.Json)
+            headers {
+                append(HttpHeaders.Accept, "application/json")
+                provider.customHeaders.forEach { (name, value) ->
+                    if (name.isNotBlank() && !name.equals("x-goog-api-key", true)) append(name, value)
+                }
+            }
+            setBody(bodyText)
+        }.execute { response ->
+            val text = response.bodyAsText()
+            recordReceivedBody(response.status.value, text)
+            if (!response.status.isSuccess()) {
+                throw RuntimeException("Gemini HTTP ${response.status.value}: ${text.take(500)}")
+            }
+            text
+        }
+        return NativeProviderProtocol.parseGeminiResponse(responseText)
+    }
+
+    private suspend fun listAnthropicModels(provider: ProviderConfig): List<String> {
+        val response = client.get("${provider.baseUrl.trimEnd('/')}/models") {
+            headers {
+                if (provider.apiKey.isNotBlank()) append("x-api-key", provider.apiKey)
+                append("anthropic-version", "2023-06-01")
+                provider.customHeaders.forEach { (name, value) ->
+                    if (name.isNotBlank() && !name.equals("x-api-key", true)) append(name, value)
+                }
+            }
+        }
+        val text = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw RuntimeException("Anthropic models HTTP ${response.status.value}: ${text.take(300)}")
+        }
+        return NativeProviderProtocol.parseAnthropicModels(text)
+    }
+
+    private suspend fun listGeminiModels(provider: ProviderConfig): List<String> {
+        val key = java.net.URLEncoder.encode(provider.apiKey, "UTF-8")
+        val response = client.get("${provider.baseUrl.trimEnd('/')}/models?key=$key") {
+            headers {
+                provider.customHeaders.forEach { (name, value) ->
+                    if (name.isNotBlank() && !name.equals("x-goog-api-key", true)) append(name, value)
+                }
+            }
+        }
+        val text = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw RuntimeException("Gemini models HTTP ${response.status.value}: ${text.take(300)}")
+        }
+        return NativeProviderProtocol.parseGeminiModels(text)
+    }
+
     /** Parse a non-streaming response while retaining metadata needed by the next agent turn. */
     internal fun parseCompletionResponse(response: String): ChatMessage {
         val parsed = json.decodeFromString(ChatResponse.serializer(), response)
@@ -380,6 +488,19 @@ class LlmClient {
         conversationId: String? = null,
         onExtraContent: (JsonObject) -> Unit = {}
     ): Flow<String> = flow {
+        if (provider.apiStyle == "anthropic" || provider.apiStyle == "gemini") {
+            val result = completeTurn(
+                provider = provider,
+                settings = settings,
+                modelId = modelId,
+                messages = messages,
+                tools = emptyList(),
+                conversationId = conversationId
+            )
+            result.extraContent?.let(onExtraContent)
+            if (result.content.isNotEmpty()) emit(result.content)
+            return@flow
+        }
         val bodyText = buildRequestBody(
             provider = provider,
             modelId = modelId,
