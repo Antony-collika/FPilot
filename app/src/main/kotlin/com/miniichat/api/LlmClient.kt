@@ -3,6 +3,7 @@ package com.miniichat.api
 import com.miniichat.data.AppSettings
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderApiProtocol
+import com.miniichat.data.RequestMetadataAdapter
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -193,7 +194,7 @@ class LlmClient {
     private fun isOmittedMetadataValue(value: String): Boolean =
         value.isBlank() || value == "@omit" || value == "null" || value == "\"@omit\"" || value == "\"\""
 
-    private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String): Map<String, String> {
+    private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String, requestMetadata: Map<String, String>): Map<String, String> {
         val resolved = provider.metadataParameters.toMutableMap()
         val modelOverrides = provider.metadataParametersByModel[modelId]?.let { raw ->
             runCatching { json.parseToJsonElement(raw).jsonObject }.getOrElse {
@@ -201,6 +202,8 @@ class LlmClient {
             }
         }
         modelOverrides?.forEach { (key, value) -> resolved[key] = value.toString() }
+        // Request Control Panel values are the final user-facing source of truth.
+        resolved.putAll(requestMetadata)
         return resolved
     }
 
@@ -211,7 +214,8 @@ class LlmClient {
         stream: Boolean,
         temperature: Float,
         tools: List<ToolDefinition> = emptyList(),
-        conversationId: String? = null
+        conversationId: String? = null,
+        requestMetadata: Map<String, String> = emptyMap()
     ): String {
         val msgsJson = kotlinx.serialization.json.buildJsonArray {
             for (m in messages) {
@@ -246,11 +250,13 @@ class LlmClient {
                 })
             }
         }
-        val metadata = resolvedMetadataParameters(provider, modelId)
+        val metadata = resolvedMetadataParameters(provider, modelId, requestMetadata)
         val obj = buildJsonObject {
             put("model", modelId)
             put("stream", stream)
-            if (!isOmittedMetadataValue(metadata["temperature"].orEmpty())) put("temperature", temperature)
+            val temperatureValue = metadata["temperature"]
+            if (temperatureValue == null) put("temperature", temperature)
+            else if (!isOmittedMetadataValue(temperatureValue)) put("temperature", coerceToJson(temperatureValue))
             put("messages", msgsJson)
             mistralPromptCacheKey(provider, conversationId)?.let {
                 put("prompt_cache_key", it)
@@ -272,7 +278,7 @@ class LlmClient {
             }
             // Metadata overrides are provider-scoped and only emitted when explicitly configured.
             for ((k, v) in metadata) {
-                if (k.isBlank() || isOmittedMetadataValue(v)) continue
+                if (k.isBlank() || k == "temperature" || isOmittedMetadataValue(v)) continue
                 if (v.isBlank()) continue
                 put(k, coerceToJson(v))
             }
@@ -293,7 +299,8 @@ class LlmClient {
         modelId: String,
         messages: List<ChatMessage>,
         stream: Boolean,
-        tools: List<ToolDefinition> = emptyList()
+        tools: List<ToolDefinition> = emptyList(),
+        requestMetadata: Map<String, String> = emptyMap()
     ): String {
         val input = kotlinx.serialization.json.buildJsonArray {
             for (message in messages) {
@@ -351,7 +358,7 @@ class LlmClient {
             }
         }
 
-        val metadata = resolvedMetadataParameters(provider, modelId)
+        val metadata = resolvedMetadataParameters(provider, modelId, requestMetadata)
         val body = buildJsonObject {
             put("model", modelId)
             put("input", input)
@@ -596,7 +603,7 @@ class LlmClient {
     ): Flow<String> = flow {
         val useResponses = provider.apiProtocol == ProviderApiProtocol.RESPONSES
         val bodyText = if (useResponses) {
-            buildResponsesRequestBody(provider, modelId, messages, stream = settings.stream)
+            buildResponsesRequestBody(provider, modelId, messages, stream = settings.stream, requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings))
         } else {
             buildRequestBody(
                 provider = provider,
@@ -604,7 +611,8 @@ class LlmClient {
                 messages = messages,
                 stream = settings.stream,
                 temperature = settings.temperature,
-                conversationId = conversationId
+                conversationId = conversationId,
+                requestMetadata = RequestMetadataAdapter.parameters(provider, modelId, settings)
             )
         }
         recordRequestBody(bodyText)

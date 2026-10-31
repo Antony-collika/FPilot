@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
-import com.miniichat.data.MetadataParameterCatalog
 import com.miniichat.data.ProviderPresets
 import com.miniichat.util.BaseUrlNormalizer
 import com.miniichat.util.newId
@@ -85,21 +84,10 @@ fun ProviderEditorScreen(
             initial?.extraBody?.map { it.key to it.value } ?: emptyList()
         )
     }
-    var metadataRows by remember(initial?.id) {
-        mutableStateOf<List<Pair<String, String>>>(
-            initial?.metadataParameters?.map { it.key to it.value } ?: emptyList()
-        )
-    }
-    var modelMetadataRows by remember(initial?.id) {
-        mutableStateOf<List<Pair<String, String>>>(
-            initial?.metadataParametersByModel?.map { it.key to it.value } ?: emptyList()
-        )
-    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
             || (initial?.extraBody?.isNotEmpty() == true)
-            || (initial?.metadataParameters?.isNotEmpty() == true)
-            || (initial?.metadataParametersByModel?.isNotEmpty() == true))
+)
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
 
@@ -149,11 +137,7 @@ fun ProviderEditorScreen(
                         apiKey = apiKey.trim(),
                         customHeaders = headers,
                         extraBody = body,
-                        apiProtocol = apiProtocol,
-                        metadataParameters = metadataRows.filter { it.first.isNotBlank() }
-                            .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() },
-                        metadataParametersByModel = modelMetadataRows.filter { it.first.isNotBlank() && it.second.isNotBlank() }
-                            .associate { it.first.trim() to it.second.trim() }
+                        apiProtocol = apiProtocol
                     )
                     onSave(p)
                 }
@@ -262,28 +246,6 @@ fun ProviderEditorScreen(
                     hint = stringResource(R.string.custom_headers_hint),
                     rows = headerRows,
                     onChange = { headerRows = it.toMutableList() }
-                )
-                KeyValueEditor(
-                    title = "API metadata parameters",
-                    hint = "Per-provider request fields. Enter JSON values such as 0.4, true, \"high\", or {\"effort\":\"high\"}. Leave a key empty to omit it. Unsupported fields may be rejected by the selected model.",
-                    rows = metadataRows,
-                    onChange = { metadataRows = it.toMutableList() }
-                )
-                Text(
-                    "Common fields for this protocol: " + MetadataParameterCatalog.forProtocol(apiProtocol).joinToString { it.key } + ". Actual support still depends on provider and model.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                KeyValueEditor(
-                    title = "Model-specific overrides",
-                    hint = "Key: exact model ID. Value: JSON object of parameter overrides. These values take precedence over provider-level metadata. Example: {\"temperature\":0.2,\"reasoning\":{\"effort\":\"high\"}}",
-                    rows = modelMetadataRows,
-                    onChange = { modelMetadataRows = it.toMutableList() }
-                )
-                Text(
-                    "Use @omit as a value to suppress an application-supplied default such as Chat Completions temperature. Leave parameters absent to let the provider apply its own defaults. Model capability discovery is not standardized across compatible APIs, so verify support for the selected model.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 KeyValueEditor(
                     title = stringResource(R.string.extra_body),

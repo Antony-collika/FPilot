@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -34,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.miniichat.data.AppSettings
+import com.miniichat.data.ProviderConfig
+import com.miniichat.data.RequestMetadataAdapter
 import com.miniichat.data.CardRole
 import com.miniichat.data.RequestCard
 import com.miniichat.data.SessionFiles
@@ -53,6 +57,7 @@ data class PickedFile(val cardId: String, val uri: String, val name: String)
 fun CardEditScreen(
     card: RequestCard,
     settings: AppSettings,
+    provider: ProviderConfig?,
     hasWorkspace: Boolean,
     sessionMemoryEnabled: Boolean,
     historyTurnCount: Int,
@@ -74,6 +79,13 @@ fun CardEditScreen(
 ) {
     var draft by remember(card.id) { mutableStateOf(card) }
     var temperature by remember(card.id) { mutableStateOf(settings.temperature) }
+    var temperatureEnabled by remember(card.id) { mutableStateOf(settings.temperatureEnabled) }
+    var topP by remember(card.id) { mutableStateOf(settings.topP) }
+    var topPEnabled by remember(card.id) { mutableStateOf(settings.topPEnabled) }
+    var maxOutputTokens by remember(card.id) { mutableStateOf(settings.maxOutputTokens) }
+    var maxOutputTokensEnabled by remember(card.id) { mutableStateOf(settings.maxOutputTokensEnabled) }
+    var reasoningEffort by remember(card.id) { mutableStateOf(settings.reasoningEffort) }
+    var reasoningEnabled by remember(card.id) { mutableStateOf(settings.reasoningEnabled) }
     var stream by remember(card.id) { mutableStateOf(settings.stream) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
@@ -86,7 +98,11 @@ fun CardEditScreen(
 
     val isMetadata = card.role == CardRole.METADATA
     val dirty = if (isMetadata) {
-        temperature != settings.temperature || stream != settings.stream
+        temperature != settings.temperature || temperatureEnabled != settings.temperatureEnabled ||
+            topP != settings.topP || topPEnabled != settings.topPEnabled ||
+            maxOutputTokens != settings.maxOutputTokens || maxOutputTokensEnabled != settings.maxOutputTokensEnabled ||
+            reasoningEffort != settings.reasoningEffort || reasoningEnabled != settings.reasoningEnabled ||
+            stream != settings.stream
     } else {
         draft != card
     }
@@ -97,7 +113,15 @@ fun CardEditScreen(
 
     fun save() {
         if (isMetadata) {
-            onSaveSettings { it.copy(temperature = temperature, stream = stream) }
+            onSaveSettings {
+                it.copy(
+                    temperature = temperature, temperatureEnabled = temperatureEnabled,
+                    topP = topP, topPEnabled = topPEnabled,
+                    maxOutputTokens = maxOutputTokens, maxOutputTokensEnabled = maxOutputTokensEnabled,
+                    reasoningEffort = reasoningEffort, reasoningEnabled = reasoningEnabled,
+                    stream = stream
+                )
+            }
         } else {
             onSaveCard(draft)
         }
@@ -123,11 +147,16 @@ fun CardEditScreen(
         ) {
             when (card.role) {
                 CardRole.METADATA -> MetadataEditor(
-                    settings = settings,
-                    temperature = temperature,
-                    onTemperature = { temperature = it },
-                    stream = stream,
-                    onStream = { stream = it }
+                    settings = settings, provider = provider,
+                    temperature = temperature, onTemperature = { temperature = it },
+                    temperatureEnabled = temperatureEnabled, onTemperatureEnabled = { temperatureEnabled = it },
+                    topP = topP, onTopP = { topP = it },
+                    topPEnabled = topPEnabled, onTopPEnabled = { topPEnabled = it },
+                    maxOutputTokens = maxOutputTokens, onMaxOutputTokens = { maxOutputTokens = it },
+                    maxOutputTokensEnabled = maxOutputTokensEnabled, onMaxOutputTokensEnabled = { maxOutputTokensEnabled = it },
+                    reasoningEffort = reasoningEffort, onReasoningEffort = { reasoningEffort = it },
+                    reasoningEnabled = reasoningEnabled, onReasoningEnabled = { reasoningEnabled = it },
+                    stream = stream, onStream = { stream = it }
                 )
                 CardRole.DIRECTORY_TREE -> TreeEditor(draft, hasWorkspace) { draft = it }
                 CardRole.HISTORY -> HistoryEditor(draft, dirty, { draft = it }, onOpenHistoryManager, sessionFiles, onRepairHistory, onCreateHistoryTemplate, onOpenFile)
@@ -184,31 +213,93 @@ fun CardEditScreen(
 
 @Composable
 private fun MetadataEditor(
-    settings: AppSettings,
-    temperature: Float,
-    onTemperature: (Float) -> Unit,
-    stream: Boolean,
-    onStream: (Boolean) -> Unit
+    settings: AppSettings, provider: ProviderConfig?,
+    temperature: Float, onTemperature: (Float) -> Unit,
+    temperatureEnabled: Boolean, onTemperatureEnabled: (Boolean) -> Unit,
+    topP: Float, onTopP: (Float) -> Unit,
+    topPEnabled: Boolean, onTopPEnabled: (Boolean) -> Unit,
+    maxOutputTokens: Int, onMaxOutputTokens: (Int) -> Unit,
+    maxOutputTokensEnabled: Boolean, onMaxOutputTokensEnabled: (Boolean) -> Unit,
+    reasoningEffort: String, onReasoningEffort: (String) -> Unit,
+    reasoningEnabled: Boolean, onReasoningEnabled: (Boolean) -> Unit,
+    stream: Boolean, onStream: (Boolean) -> Unit
 ) {
+    var reasoningMenu by remember { mutableStateOf(false) }
     Text("Model", style = MaterialTheme.typography.labelLarge)
-    Text(
-        settings.activeModel.ifBlank { "No model selected" },
-        style = MaterialTheme.typography.bodyLarge
-    )
-    Text(
-        "The model and provider are chosen with the model picker in the chat.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(8.dp))
-    Text("Temperature: ${"%.2f".format(temperature)}", style = MaterialTheme.typography.labelLarge)
-    Slider(value = temperature, onValueChange = onTemperature, valueRange = 0f..2f, steps = 19)
-    SwitchRow(
-        title = "Streaming",
+    Text(settings.activeModel.ifBlank { "No model selected" }, style = MaterialTheme.typography.bodyLarge)
+    Text(provider?.name?.let { "Provider: $it" } ?: "Select a provider and model to see compatible controls.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(12.dp))
+    val supported = provider?.let { RequestMetadataAdapter.supportedOptions(it, settings.activeModel) }.orEmpty()
+    if ("temperature" in supported) MetadataSlider(
+        "Temperature", "Controls randomness. Lower values are more focused.", temperature, 0f..2f,
+        "%.2f".format(temperature), temperatureEnabled, onTemperatureEnabled, onTemperature)
+    if ("top_p" in supported) MetadataSlider(
+        "Top P", "Controls how broadly the model considers likely next tokens.", topP, 0f..1f,
+        "%.2f".format(topP), topPEnabled, onTopPEnabled, onTopP)
+    if ("max_output_tokens" in supported) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Maximum response length", style = MaterialTheme.typography.titleSmall)
+                    Text("Limits the number of tokens generated.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = maxOutputTokensEnabled, onCheckedChange = onMaxOutputTokensEnabled)
+            }
+            Text("$maxOutputTokens tokens", style = MaterialTheme.typography.labelLarge)
+            Slider(value = maxOutputTokens.toFloat().coerceIn(256f, 16384f),
+                onValueChange = { onMaxOutputTokens((it / 256f).toInt() * 256) },
+                valueRange = 256f..16384f, steps = 62, enabled = maxOutputTokensEnabled)
+        }
+    }
+    if ("reasoning_effort" in supported) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Reasoning effort", style = MaterialTheme.typography.titleSmall)
+                    Text("Sets how much reasoning the model should use.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = reasoningEnabled, onCheckedChange = onReasoningEnabled)
+            }
+            Box {
+                TextButton(enabled = reasoningEnabled, onClick = { reasoningMenu = true }) {
+                    Text(reasoningEffort.replaceFirstChar { it.uppercase() })
+                }
+                DropdownMenu(expanded = reasoningMenu, onDismissRequest = { reasoningMenu = false }) {
+                    listOf("low", "medium", "high").forEach { level ->
+                        DropdownMenuItem(text = { Text(level.replaceFirstChar { it.uppercase() }) },
+                            onClick = { onReasoningEffort(level); reasoningMenu = false })
+                    }
+                }
+            }
+        }
+    }
+    if (supported.isEmpty()) Text(
+        "No verified optional settings are available for this provider and model. No metadata options will be sent.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SwitchRow(title = "Streaming",
         description = "Show the answer as it is written. Used when no tools run; with tools the app waits for the whole answer.",
-        checked = stream,
-        onCheckedChange = onStream
-    )
+        checked = stream, onCheckedChange = onStream)
+}
+
+@Composable
+private fun MetadataSlider(
+    title: String, description: String, value: Float, range: ClosedFloatingPointRange<Float>,
+    valueLabel: String, enabled: Boolean, onEnabled: (Boolean) -> Unit, onValue: (Float) -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabled)
+        }
+        Text(valueLabel, style = MaterialTheme.typography.labelLarge)
+        Slider(value = value, onValueChange = onValue, valueRange = range, enabled = enabled)
+    }
 }
 
 @Composable

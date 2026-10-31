@@ -421,6 +421,7 @@ fun AppRoot(vm: ChatViewModel) {
                     CardEditScreen(
                         card = editingCard,
                         settings = settings,
+                        provider = providers.firstOrNull { it.id == settings.activeProviderId },
                         hasWorkspace = settings.workspaceTreeUri.isNotBlank(),
                         sessionMemoryEnabled = sessionMemoryEnabled,
                         historyTurnCount = activeConv?.messages?.count { it.role == "user" } ?: 0,

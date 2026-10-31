@@ -12,6 +12,7 @@ import com.miniichat.api.ToolDefinition
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.data.AppSettings
+import com.miniichat.data.RequestMetadataAdapter
 import com.miniichat.data.Conversation
 import com.miniichat.data.DataStoreSessionRepository
 import com.miniichat.data.FileSessionStore
@@ -1400,7 +1401,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             val apiJson = provider?.let {
                 if (it.apiProtocol == com.miniichat.data.ProviderApiProtocol.RESPONSES) {
-                    client.buildResponsesRequestBody(it, current.activeModel, messages, current.stream, requestTools)
+                    client.buildResponsesRequestBody(it, current.activeModel, messages, current.stream, requestTools, RequestMetadataAdapter.parameters(it, current.activeModel, current))
                 } else {
                     client.buildRequestBody(
                         provider = it,
@@ -1409,6 +1410,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         stream = current.stream,
                         temperature = current.temperature,
                         tools = requestTools,
+                        requestMetadata = RequestMetadataAdapter.parameters(it, current.activeModel, current),
                         conversationId = storedConversation?.id
                     )
                 }
