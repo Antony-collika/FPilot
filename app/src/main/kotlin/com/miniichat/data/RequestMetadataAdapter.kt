@@ -7,7 +7,7 @@ object RequestMetadataAdapter {
     private fun isReasoningModel(model: String): Boolean {
         val id = model.lowercase()
         return id.startsWith("o1") || id.startsWith("o3") || id.startsWith("o4") ||
-            id.startsWith("gpt-5")
+            id.startsWith("gpt-5") || id.contains("deepseek-reasoner")
     }
 
     fun supportedOptions(provider: ProviderConfig, model: String): Set<String> {
