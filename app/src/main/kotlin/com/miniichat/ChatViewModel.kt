@@ -1381,38 +1381,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val conversation = (storedConversation
                 ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
             val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
-            val provider = activeProvider()
-            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, provider?.name.orEmpty())
+            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
                 .build(layout, conversation.messages + next)
-            val enabledTools = buildSet {
-                if (current.toolListFilesEnabled) add("list_files")
-                if (current.toolSearchFilesEnabled) add("search_files")
-                if (current.toolSearchContentEnabled) add("search_content")
-                if (current.toolReadFileEnabled) add("read_file")
-                if (current.toolGetFileInfoEnabled) add("get_file_info")
-                if (current.toolCreateFileEnabled) add("create_file")
-                if (current.toolEditFileEnabled) add("edit_file")
-            }
-            val requestTools = when {
-                workspaceRepository == null || setup.mode == "none" -> emptyList()
-                setup.mode == "custom" -> setup.exposed.orEmpty().map { it.definition }
-                else -> MarkdownFileTools.allDefinitions().filter { it.name in enabledTools }
-            }
-            val apiJson = provider?.let {
-                if (it.apiProtocol == com.miniichat.data.ProviderApiProtocol.RESPONSES) {
-                    client.buildResponsesRequestBody(it, current.activeModel, messages, current.stream, requestTools)
-                } else {
-                    client.buildRequestBody(
-                        provider = it,
-                        modelId = current.activeModel,
-                        messages = messages,
-                        stream = current.stream,
-                        temperature = current.temperature,
-                        tools = requestTools,
-                        conversationId = storedConversation?.id
-                    )
-                }
-            }
             buildString {
                 for (message in messages) {
                     append("[").append(message.role).append("]\n")
@@ -1436,12 +1406,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             if (current.toolEditFileEnabled) add("edit_file")
                         }.joinToString(", ")
                     )
-                }
-                if (apiJson != null) {
-                    append("\n\n--- Exact API JSON body for the next request ---\n")
-                    append(apiJson)
-                } else {
-                    append("\n\nNo active provider; API JSON is unavailable.")
                 }
             }
         } catch (e: Exception) {

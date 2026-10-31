@@ -67,4 +67,25 @@ class MetadataParametersTest {
         ).jsonObject
         assertEquals("\"custom-value\"", body["vendor_option"].toString())
     }
+
+    @Test
+    fun oldProviderJsonDefaultsToNoMetadataOverrides() {
+        val oldJson = """{"id":"old","name":"OpenAI","baseUrl":"https://example.invalid/v1","apiKey":"key"}"""
+        val provider = kotlinx.serialization.json.Json.decodeFromString(
+            com.miniichat.data.ProviderConfig.serializer(), oldJson
+        )
+        assertTrue(provider.metadataParameters.isEmpty())
+    }
+
+    @Test
+    fun catalogSeparatesProtocolSpecificFields() {
+        val chatKeys = com.miniichat.data.MetadataParameterCatalog
+            .forProtocol(ProviderApiProtocol.CHAT_COMPLETIONS).map { it.key }.toSet()
+        val responsesKeys = com.miniichat.data.MetadataParameterCatalog
+            .forProtocol(ProviderApiProtocol.RESPONSES).map { it.key }.toSet()
+        assertTrue("max_output_tokens" !in chatKeys)
+        assertTrue("max_output_tokens" in responsesKeys)
+        assertTrue("max_tokens" in chatKeys)
+        assertTrue("max_tokens" !in responsesKeys)
+    }
 }
