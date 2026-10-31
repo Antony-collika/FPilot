@@ -20,7 +20,8 @@ class AgentLoop(
         tools: List<ToolDefinition>
     ) -> ChatMessage,
     private val maxToolRounds: Int = DEFAULT_MAX_TOOL_ROUNDS,
-    private val confirmToolCall: suspend (ToolCall, JsonObject) -> Boolean = { _, _ -> true }
+    private val confirmToolCall: suspend (ToolCall, JsonObject) -> Boolean = { _, _ -> false },
+    private val onToolProgress: suspend (ToolProgress) -> Unit = {}
 ) {
     init {
         require(maxToolRounds > 0) { "maxToolRounds must be positive." }
@@ -56,15 +57,27 @@ class AgentLoop(
             rounds++
 
             for ((index, call) in calls.withIndex()) {
+                onToolProgress(ToolProgress(call.name, call.id, rounds, index + 1, calls.size, ToolProgress.Phase.STARTED))
                 val cancellation = try {
-                    val result = executeSafely(call)
+                    val outcome = executeSafely(call)
                     messages += ChatMessage(
                         role = "tool",
-                        content = result,
+                        content = outcome.content,
                         toolCallId = call.id,
                         name = call.name
                     )
-                    executedCalls++
+                    if (outcome.executed) executedCalls++
+                    onToolProgress(
+                        ToolProgress(
+                            call.name,
+                            call.id,
+                            rounds,
+                            index + 1,
+                            calls.size,
+                            if (outcome.executed) ToolProgress.Phase.COMPLETED else ToolProgress.Phase.NOT_EXECUTED,
+                            outcome.content.length
+                        )
+                    )
                     null
                 } catch (cancelled: AgentLoopUserCancelledException) {
                     messages += ChatMessage(
@@ -96,23 +109,23 @@ class AgentLoop(
         }
     }
 
-    private suspend fun executeSafely(call: ToolCall): String {
+    private suspend fun executeSafely(call: ToolCall): ToolExecutionOutcome {
         if (!registry.contains(call.name)) {
-            return "Tool error: unknown tool '${call.name}'."
+            return ToolExecutionOutcome("Tool error: unknown tool '${call.name}'.", executed = false)
         }
 
         val arguments = runCatching {
             Json.parseToJsonElement(call.arguments).jsonObject
         }.getOrElse {
-            return "Tool error: invalid JSON arguments for '${call.name}'."
+            return ToolExecutionOutcome("Tool error: invalid JSON arguments for '${call.name}'.", executed = false)
         }
 
         if (!confirmToolCall(call, arguments)) {
-            return "Tool call denied by user; no tool was executed."
+            return ToolExecutionOutcome("Tool call denied by user; no tool was executed.", executed = false)
         }
 
         return try {
-            registry.execute(call.name, arguments)
+            ToolExecutionOutcome(registry.execute(call.name, arguments), executed = true)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (cancelled: AgentLoopUserCancelledException) {
@@ -122,8 +135,11 @@ class AgentLoop(
                 ?.trim('"')
                 ?.ifBlank { "(workspace root)" }
                 ?: "(workspace root)"
-            "Tool error for '${call.name}' at path '$path': ${error::class.simpleName}: ${error.message ?: "no error message"}. " +
-                "Ask the user how to proceed, stating the exact path attempted and the system error. Do not keep retrying."
+            ToolExecutionOutcome(
+                "Tool error for '${call.name}' at path '$path': ${error::class.simpleName}: ${error.message ?: "no error message"}. " +
+                    "Ask the user how to proceed, stating the exact path attempted and the system error. Do not keep retrying.",
+                executed = false
+            )
         }
     }
 
@@ -175,6 +191,20 @@ data class AgentRunResult(
     val executedToolCalls: Int,
     val userCancelled: Boolean = false
 )
+
+data class ToolProgress(
+    val toolName: String,
+    val toolCallId: String,
+    val round: Int,
+    val position: Int,
+    val total: Int,
+    val phase: Phase,
+    val resultCharacters: Int = 0
+) {
+    enum class Phase { STARTED, COMPLETED, NOT_EXECUTED }
+}
+
+private data class ToolExecutionOutcome(val content: String, val executed: Boolean)
 
 class AgentLoopUserCancelledException(message: String) : IllegalStateException(message)
 
