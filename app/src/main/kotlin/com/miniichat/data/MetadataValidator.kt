@@ -33,7 +33,7 @@ object MetadataValidator {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "Invalid parameter name. Use a JSON key or dotted object path."))
                 return@forEach
             }
-            if (key in reserved) {
+            if (key.substringBefore(".") in reserved) {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "This key is reserved for the request structure and cannot be overridden."))
                 return@forEach
             }
