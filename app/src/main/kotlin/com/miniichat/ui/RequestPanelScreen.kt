@@ -84,11 +84,13 @@ fun RequestPanelScreen(
     onAddCard: (RequestLayout, RequestCard) -> Unit,
     onEditCard: (String) -> Unit,
     makePreview: suspend () -> String,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onInitializeWorkspace: () -> Unit
 ) {
     var deletingId by remember { mutableStateOf<String?>(null) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
+    var showInitializeWorkspace by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var previewText by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -202,6 +204,11 @@ fun RequestPanelScreen(
                 }
             }
             TextButton(onClick = { scope.launch { previewText = makePreview() } }) { Text("Preview the next request") }
+            if (hasWorkspace) {
+                TextButton(onClick = { showInitializeWorkspace = true }) {
+                    Text("Initialize Glassbox workspace documents")
+                }
+            }
             TextButton(onClick = { showReset = true }) { Text("Reset to default cards") }
             Spacer(Modifier.height(24.dp))
         }
@@ -220,6 +227,29 @@ fun RequestPanelScreen(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { deletingId = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (showInitializeWorkspace) {
+        AlertDialog(
+            onDismissRequest = { showInitializeWorkspace = false },
+            title = { Text("Initialize workspace documents?") },
+            text = {
+                Text(
+                    "This creates .fpilot/config.md, system.md, request-layout.md, memory.md, " +
+                        "tools/workspace.md, and the tools, skills, sessions, and requests folders. " +
+                        "Existing files are preserved and never overwritten. Your current Request Control Panel is unchanged."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showInitializeWorkspace = false
+                    onInitializeWorkspace()
+                }) { Text("Initialize") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInitializeWorkspace = false }) { Text("Cancel") }
+            }
         )
     }
 
