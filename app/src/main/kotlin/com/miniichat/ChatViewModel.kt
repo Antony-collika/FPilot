@@ -5,6 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.miniichat.api.ChatMessage
 import com.miniichat.api.LlmClient
+import com.miniichat.api.GenerationRequest
+import com.miniichat.api.GenerationEvent
+import com.miniichat.api.GenerationRuntime
+import com.miniichat.api.OpenAiCompatibleGenerationRuntime
 import com.miniichat.api.ToolCall
 import com.miniichat.agent.AgentLoop
 import com.miniichat.agent.ExposedTool
@@ -91,6 +95,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val settingsRepo = SettingsRepository(app)
     val providerStore = ProviderStore(app)
     private val client = LlmClient()
+    private val generationRuntime: GenerationRuntime = OpenAiCompatibleGenerationRuntime(client)
     val llmRequestLogs: StateFlow<String> = client.requestLogs
 
     fun clearLlmRequestLogs() = client.clearRequestLogs()
@@ -838,13 +843,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 }
                             ),
                             complete = { messages, tools ->
-                                client.completeTurn(
-                                    provider = provider,
-                                    settings = effectiveSettings,
-                                    modelId = model,
-                                    messages = messages,
-                                    tools = tools,
-                                    conversationId = activeId
+                                generationRuntime.complete(
+                                    GenerationRequest(
+                                        provider = provider,
+                                        settings = effectiveSettings,
+                                        modelId = model,
+                                        messages = messages,
+                                        tools = tools,
+                                        conversationId = activeId
+                                    )
                                 )
                             },
                             maxToolRounds = current.agentMaxToolRounds,
@@ -885,25 +892,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             )
                         }
                     } else {
-                        client.chatStream(
-                            provider = provider,
-                            settings = effectiveSettings,
-                            modelId = model,
-                            messages = historyForApi,
-                            conversationId = activeId,
-                            onExtraContent = { streamExtraContent = it }
-                        )
-                            .collect { delta ->
-                                builder.append(delta)
-                                // 1) update in-memory overlay every token (no IO)
-                                _streamingOverlay.value = assistantId to shown(builder.toString())
-                                // 2) throttled DataStore flush
-                                val now = System.currentTimeMillis()
-                                if (sessionFiles == null && now - lastFlush >= flushIntervalMs) {
-                                    appendAssistant(activeId, assistantId, shown(builder.toString()))
-                                    lastFlush = now
+                        generationRuntime.stream(
+                            GenerationRequest(
+                                provider = provider,
+                                settings = effectiveSettings,
+                                modelId = model,
+                                messages = historyForApi,
+                                conversationId = activeId
+                            )
+                        ).collect { event ->
+                            when (event) {
+                                is GenerationEvent.TextDelta -> {
+                                    builder.append(event.text)
+                                    // 1) update in-memory overlay every token (no IO)
+                                    _streamingOverlay.value = assistantId to shown(builder.toString())
+                                    // 2) throttled DataStore flush
+                                    val now = System.currentTimeMillis()
+                                    if (sessionFiles == null && now - lastFlush >= flushIntervalMs) {
+                                        appendAssistant(activeId, assistantId, shown(builder.toString()))
+                                        lastFlush = now
+                                    }
+                                }
+                                is GenerationEvent.ToolCallUpdate -> {
+                                    _streamingOverlay.value = assistantId to
+                                        "Receiving tool call: ${event.name}"
+                                }
+                                is GenerationEvent.Completed -> {
+                                    streamExtraContent = event.message.extraContent
                                 }
                             }
+                        }
                         val processed = handleMemoryPatch(memoryCard, builder.toString())
                         if (processed != builder.toString()) {
                             builder.clear()
