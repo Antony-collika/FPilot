@@ -32,6 +32,17 @@ A missing key inherits from the lower layer. `@omit` and `@disabled` explicitly 
 | LM Studio Chat Completions | https://lmstudio.ai/docs/developer/openai-compat |
 | LM Studio Responses | https://lmstudio.ai/docs/developer/openai-compat/responses |
 
+
+## Validation and request inspection
+
+Provider metadata, global metadata, Extra Body values, model overrides, and active request controls are validated before serialization. Invalid JSON literals, malformed parameter paths, reserved transport keys, known value-type mismatches, and catalog fields assigned to the wrong protocol stop the request with a field-specific error. Unknown provider extensions are retained and surfaced as warnings; they are not silently discarded. The explicit `@omit` and `@disabled` markers are accepted, including when stored as JSON strings in a model override.
+
+The Provider Editor displays validation issues and disables Save while errors remain. The Request Control Panel's **Preview the next request** action builds the next request without sending it and includes the exact serialized API JSON body, allowing the resolved values and nested paths to be inspected before transmission.
+
+## Current scope
+
+The registry covers the 11 built-in identities (OpenAI, OpenRouter, DeepSeek, Groq, Mistral, Together AI, Gemini OpenAI-compatible, SiliconFlow, Ollama, LM Studio, and Custom). Capability statuses are advisory static rules, not runtime discovery. For aggregators and local servers, the selected model may support fewer fields than the endpoint documentation. Unknown fields remain configurable so provider-specific extensions are not blocked by the built-in catalog.
+
 ## Interpretation
 
 - `Documented` means the field appears in the provider's endpoint documentation for that protocol.
