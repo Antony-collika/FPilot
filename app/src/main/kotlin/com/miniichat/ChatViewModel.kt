@@ -1429,31 +1429,68 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val conversation = (storedConversation
                 ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
             val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
-            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
-                .build(layout, conversation.messages + next)
-            buildString {
-                for (message in messages) {
-                    append("[").append(message.role).append("]\n")
-                    val parts = message.parts
-                    append(if (parts != null) parts.joinToString("\n") { it.text ?: "[image]" } else message.content)
-                    message.toolCalls?.forEach { append("\n  tool call: ${it.name} ${it.arguments}") }
-                    append("\n\n")
+            val snapshot = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
+                .compile(layout, conversation.messages + next)
+            val tools = when {
+                workspaceRepository == null || setup.mode == "none" -> emptyList()
+                setup.mode == "custom" -> setup.exposed.orEmpty().map { it.definition }
+                else -> {
+                    val enabled = buildSet {
+                        if (current.toolListFilesEnabled) add("list_files")
+                        if (current.toolSearchFilesEnabled) add("search_files")
+                        if (current.toolSearchContentEnabled) add("search_content")
+                        if (current.toolReadFileEnabled) add("read_file")
+                        if (current.toolGetFileInfoEnabled) add("get_file_info")
+                        if (current.toolCreateFileEnabled && current.allowWorkspaceCreate) add("create_file")
+                        if (current.toolEditFileEnabled && current.allowWorkspaceEdit) add("edit_file")
+                    }
+                    MarkdownFileTools.allDefinitions().filter { it.name in enabled }
                 }
-                append("--- Tools ---\n")
-                when {
-                    workspaceRepository == null || setup.mode == "none" -> append("No tools.")
-                    setup.mode == "custom" -> append(setup.specs.joinToString(", ") { it.name })
-                    else -> append(
-                        buildList {
-                            if (current.toolListFilesEnabled) add("list_files")
-                            if (current.toolSearchFilesEnabled) add("search_files")
-                            if (current.toolSearchContentEnabled) add("search_content")
-                            if (current.toolReadFileEnabled) add("read_file")
-                            if (current.toolGetFileInfoEnabled) add("get_file_info")
-                            if (current.toolCreateFileEnabled) add("create_file")
-                            if (current.toolEditFileEnabled) add("edit_file")
-                        }.joinToString(", ")
-                    )
+            }
+            buildString {
+                appendLine("EFFECTIVE REQUEST SNAPSHOT")
+                appendLine("Fingerprint: ${snapshot.fingerprint}")
+                appendLine("Messages: ${snapshot.messages.size}")
+                appendLine("Credentials and authorization headers are not part of this snapshot.")
+                appendLine()
+                for ((index, message) in snapshot.messages.withIndex()) {
+                    val source = snapshot.parts[index]
+                    appendLine("--- Message ${index + 1} ---")
+                    appendLine("role: ${message.role}")
+                    appendLine("card: ${source.cardName} (${source.cardId})")
+                    appendLine("source: ${source.sourceKind}${source.sourceLocation?.let { " · $it" } ?: ""}")
+                    source.messageId?.let { appendLine("message_id: $it") }
+                    appendLine("sha256: ${source.contentSha256}")
+                    appendLine("[content]")
+                    val parts = message.parts
+                    append(if (parts != null) parts.joinToString("\\n") {
+                        when (it.type) {
+                            "text" -> it.text.orEmpty()
+                            "image_url" -> "[image attachment omitted from preview]"
+                            else -> "[${it.type} attachment]"
+                        }
+                    } else message.content)
+                    message.toolCalls?.forEach {
+                        append("\\n  tool call: ${it.name} ${it.arguments}")
+                    }
+                    appendLine()
+                    appendLine("[/content]")
+                    appendLine()
+                }
+                appendLine("--- EFFECTIVE TOOLS ---")
+                if (tools.isEmpty()) {
+                    appendLine("No tools.")
+                } else {
+                    tools.forEach { tool ->
+                        appendLine("## ${tool.name}")
+                        appendLine(tool.description)
+                        appendLine("schema: ${tool.parameters}")
+                        appendLine()
+                    }
+                }
+                val toolsCard = layout.cards.firstOrNull { it.role == CardRole.TOOLS && it.enabled }
+                toolsCard?.let {
+                    appendLine("Tool definitions source: " + if (it.source == "file") it.fileUri else "Tools card text")
                 }
             }
         } catch (e: Exception) {
