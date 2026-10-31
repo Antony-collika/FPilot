@@ -52,6 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.MetadataIssueLevel
+import com.miniichat.data.MetadataParameterCatalog
+import com.miniichat.data.MetadataValidator
 import com.miniichat.data.ProviderKinds
 import com.miniichat.data.ProviderPresets
 import com.miniichat.util.BaseUrlNormalizer
@@ -101,6 +104,27 @@ fun ProviderEditorScreen(
 )
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
+    val metadataIssues = remember(metadataRows, modelMetadataRows, bodyRows, apiProtocol) {
+        buildList {
+            addAll(MetadataValidator.validate(
+                metadataRows.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second.trim() },
+                apiProtocol
+            ))
+            addAll(MetadataValidator.validate(
+                bodyRows.filter { it.first.isNotBlank() }.associate { it.first.trim() to it.second.trim() },
+                apiProtocol
+            ))
+            modelMetadataRows.filter { it.first.isNotBlank() }.forEach { (modelId, raw) ->
+                runCatching { MetadataParameterCatalog.parseOverrides(raw) }.onFailure {
+                    add(com.miniichat.data.MetadataValidationIssue(
+                        modelId, MetadataIssueLevel.ERROR,
+                        "Model override must be a valid JSON object."
+                    ))
+                }
+            }
+        }
+    }
+    val hasMetadataErrors = metadataIssues.any { it.level == MetadataIssueLevel.ERROR }
 
     Column(
         modifier = Modifier
@@ -127,7 +151,8 @@ fun ProviderEditorScreen(
             )
             TextButton(
                 enabled = name.isNotBlank()
-                    && (baseUrl.isNotBlank() || presetBaseUrl.isNotBlank() || initial?.baseUrl?.isNotBlank() == true),
+                    && (baseUrl.isNotBlank() || presetBaseUrl.isNotBlank() || initial?.baseUrl?.isNotBlank() == true)
+                    && !hasMetadataErrors,
                 onClick = {
                     val effective = baseUrl.trim().ifEmpty {
                         presetBaseUrl.ifEmpty { initial?.baseUrl ?: "" }
@@ -312,6 +337,14 @@ fun ProviderEditorScreen(
                     rows = modelMetadataRows,
                     onChange = { modelMetadataRows = it.toMutableList() }
                 )
+                metadataIssues.forEach { issue ->
+                    Text(
+                        "${issue.key}: ${issue.message}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (issue.level == MetadataIssueLevel.ERROR) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(Modifier.height(40.dp))
