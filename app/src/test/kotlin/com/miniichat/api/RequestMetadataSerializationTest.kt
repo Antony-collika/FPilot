@@ -35,7 +35,7 @@ class RequestMetadataSerializationTest {
     }
 
     @Test
-    fun disabledChatControlsAreOmittedEvenIfLegacyProviderValuesExist() {
+    fun disabledGlobalControlsLeaveProviderOverridesInherited() {
         val provider = ProviderConfig(
             "openai", "OpenAI", "https://api.openai.com/v1", "key",
             metadataParameters = mapOf("temperature" to "1.5", "top_p" to "0.9", "max_completion_tokens" to "9000"),
@@ -49,9 +49,9 @@ class RequestMetadataSerializationTest {
             )
         ).jsonObject
 
-        assertFalse("temperature" in body)
-        assertFalse("top_p" in body)
-        assertFalse("max_completion_tokens" in body)
+        assertEquals("1.5", body["temperature"].toString())
+        assertEquals("0.9", body["top_p"].toString())
+        assertEquals("9000", body["max_completion_tokens"].toString())
     }
 
     @Test
