@@ -1463,7 +1463,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     appendLine("sha256: ${source.contentSha256}")
                     appendLine("[content]")
                     val parts = message.parts
-                    append(if (parts != null) parts.joinToString("\\n") {
+                    append(if (parts != null) parts.joinToString("\n") {
                         when (it.type) {
                             "text" -> it.text.orEmpty()
                             "image_url" -> "[image attachment omitted from preview]"
@@ -1471,7 +1471,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     } else message.content)
                     message.toolCalls?.forEach {
-                        append("\\n  tool call: ${it.name} ${it.arguments}")
+                        append("\n  tool call: ${it.name} ${it.arguments}")
                     }
                     appendLine()
                     appendLine("[/content]")
