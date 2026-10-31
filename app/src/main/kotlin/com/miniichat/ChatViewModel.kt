@@ -241,15 +241,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         fun value(name: String): String = arguments[name]?.jsonPrimitive?.contentOrNull.orEmpty()
-        fun preview(name: String): String {
-            val value = value(name)
-            return if (value.length > 500) value.take(500) + "…" else value
-        }
         val path = value("path").ifBlank { value("query").ifBlank { "(no path)" } }
         val summary = when (uid) {
-            "create_file" -> "Create a Markdown file (${value("content").length} characters). Preview:\n${preview("content")}"
-            "edit_file" -> "Review the proposed exact-match change:\n" +
-                ExactTextDiff.render(value("target"), value("replacement"), maxOutputChars = 5_000)
+            "create_file" -> {
+                val proposed = value("content")
+                if (proposed.length > 12_000) {
+                    _error.value = "The proposed file is too large to review completely in the approval dialog. Ask the agent for a smaller change; no file was created."
+                    return false
+                }
+                "Create a Markdown file (${proposed.length} characters). Full content preview:\n$proposed"
+            }
+            "edit_file" -> {
+                val diff = ExactTextDiff.render(
+                    value("target"),
+                    value("replacement"),
+                    maxOutputChars = 12_000
+                )
+                if (diff.contains("[Diff preview truncated.]") ||
+                    diff.contains("[Detailed diff omitted")
+                ) {
+                    _error.value = "The proposed edit is too large to review completely in the approval dialog. Ask the agent for a smaller exact-match change; no file was modified."
+                    return false
+                }
+                "Review the complete proposed exact-match diff:\n$diff"
+            }
             "read_file" -> "Read file content. Path: $path"
             "list_files" -> "List directory entries. Path: ${value("path").ifBlank { "(workspace root)" }}"
             "search_files", "search_content" -> "Search query: ${value("query")}\nStarting path: ${value("path").ifBlank { "(workspace root)" }}"
@@ -1428,14 +1443,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * the answer without the block. If anything is wrong, the file is left untouched.
      */
     private suspend fun confirmMemoryPatch(patch: String): Boolean {
+        if (patch.length > 4_000) {
+            _error.value = "The proposed memory change is too large to review completely. Ask for a smaller update; no memory was changed."
+            return false
+        }
         val deferred = CompletableDeferred<Boolean>()
         approvalCompletion = deferred
         _pendingToolApproval.value = ToolApprovalRequest(
             toolName = "memory_update",
             path = "memory.md",
-            summary = "Review this proposed change before it is written:\n\n" +
-                patch.take(4_000) +
-                if (patch.length > 4_000) "\n\n[Preview truncated. The full patch is not shown.]" else ""
+            summary = "Review this proposed change before it is written:\n\n" + patch
         )
         return try {
             deferred.await()
