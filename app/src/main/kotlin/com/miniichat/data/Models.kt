@@ -93,3 +93,13 @@ data class Conversation(
     /** Persisted Storage tree URI; changing Settings does not redirect an existing session. */
     @SerialName("session_storage_uri") val sessionStorageUri: String? = null
 )
+
+/** Records an in-app text edit without reusing or executing the message's old tool calls. */
+fun Message.withEditedContent(newContent: String): Message {
+    if (newContent == content) return this
+    return copy(
+        content = newContent,
+        edited = true,
+        originalContentSha256 = originalContentSha256 ?: HistoryMeta.contentSha256(content)
+    )
+}
