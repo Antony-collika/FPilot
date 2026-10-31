@@ -14,6 +14,42 @@ import org.junit.Test
 
 class AgentLoopTest {
     @Test
+    fun toolCallsAreDeniedWhenNoApprovalHandlerIsProvided() = runBlocking {
+        var executed = false
+        var completionCount = 0
+        val tool = object : AgentTool {
+            override val definition = ToolDefinition(
+                name = "mutate",
+                description = "A mutation tool.",
+                parameters = Json.parseToJsonElement("""{"type":"object","properties":{}}""").jsonObject
+            )
+            override suspend fun execute(arguments: kotlinx.serialization.json.JsonObject): String {
+                executed = true
+                return "mutated"
+            }
+        }
+        val loop = AgentLoop(
+            registry = AgentToolRegistry(listOf(tool)),
+            complete = { messages, _ ->
+                completionCount++
+                if (completionCount == 1) {
+                    ChatMessage(role = "assistant", content = "", toolCalls = listOf(ToolCall("call-1", "mutate", "{}")))
+                } else {
+                    assertTrue(messages.last { it.role == "tool" }.content.contains("denied"))
+                    ChatMessage(role = "assistant", content = "No mutation was performed.")
+                }
+            }
+        )
+
+        val result = loop.run(listOf(ChatMessage(role = "user", content = "Mutate.")))
+
+        assertEquals(false, executed)
+        assertEquals(0, result.executedToolCalls)
+        assertEquals(1, result.toolRounds)
+        assertEquals("No mutation was performed.", result.finalMessage.content)
+    }
+
+    @Test
     fun executesToolAndReturnsFinalAssistantMessage() = runBlocking {
         var completionCount = 0
         val tool = object : AgentTool {
@@ -50,7 +86,7 @@ class AgentLoopTest {
                 }
                 else -> error("Unexpected extra model completion.")
             }
-        })
+        }, confirmToolCall = { _, _ -> true })
 
         val result = loop.run(listOf(ChatMessage(role = "user", content = "Run the tool.")))
 
@@ -145,7 +181,8 @@ class AgentLoopTest {
                     }
                     else -> error("Unexpected extra completion.")
                 }
-            }
+            },
+            confirmToolCall = { _, _ -> true }
         )
 
         loop.run(listOf(ChatMessage(role = "user", content = "Run.")))
