@@ -244,6 +244,28 @@ class SafFileRepository(
         return chunk.content
     }
 
+    /** Create or locate a directory relative to the selected workspace. */
+    suspend fun createDirectory(path: String): Uri = mutationMutex.withLock {
+        val normalized = normalizeRelativePath(path)
+        require(normalized.isNotBlank()) { "A directory path is required." }
+        var parent = rootDocumentUri()
+        for (segment in normalized.split('/')) {
+            val existing = findChild(parent, segment)
+            parent = if (existing != null) {
+                require(isDirectory(existing)) { "A file exists where a directory is required: $segment" }
+                existing
+            } else {
+                DocumentsContract.createDocument(
+                    contentResolver,
+                    parent,
+                    DocumentsContract.Document.MIME_TYPE_DIR,
+                    segment
+                ) ?: throw IOException("The document provider could not create directory: $segment")
+            }
+        }
+        parent
+    }
+
     /**
      * Serializes writes made through this repository instance. SAF providers do not expose a
      * portable compare-and-swap primitive, so callers must still treat this as optimistic
