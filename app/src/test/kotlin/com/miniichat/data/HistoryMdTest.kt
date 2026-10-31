@@ -250,4 +250,56 @@ broken
         assertEquals("b4e2d8a1", sidecar.session)
         assertFalse(metadata.contains(original.sessionId))
     }
+
+    @Test
+    fun appEditedMessagesRetainTheirOriginalDigestAndToolRounds() {
+        val round = ToolRound(
+            toolCalls = listOf(StoredToolCall("c1", "read_file", """{"path":"a.md"}""")),
+            results = listOf(StoredToolResult("c1", "read_file", "contents"))
+        )
+        val original = Message("a1", "assistant", "Generated answer", toolRounds = listOf(round))
+        val edited = original.withEditedContent("Human-edited answer")
+        val document = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "Edits",
+            createdAt = 100,
+            nextTurn = 1,
+            messages = listOf(edited)
+        )
+
+        val parsed = HistoryMd.parse(
+            HistoryMd.render(document, sidecarFormat = true),
+            document.sessionId,
+            document.title,
+            HistoryMeta.render(document)
+        ).messages.single()
+
+        assertTrue(parsed.edited)
+        assertEquals(HistoryMeta.contentSha256(original.content), parsed.originalContentSha256)
+        assertEquals(round, parsed.toolRounds.single())
+        assertEquals("Human-edited answer", parsed.content)
+    }
+
+    @Test
+    fun externalMarkdownEditsAreDetectedAgainstTheSidecarDigest() {
+        val original = HistoryDocument(
+            sessionId = "a3f9c1d2",
+            title = "External edit",
+            createdAt = 100,
+            nextTurn = 1,
+            messages = listOf(Message("a1", "assistant", "Generated answer", createdAt = 10))
+        )
+        val originalMarkdown = HistoryMd.render(original, sidecarFormat = true)
+        val editedMarkdown = originalMarkdown.replace("Generated answer", "Changed in a Markdown editor")
+        val parsed = HistoryMd.parse(
+            editedMarkdown,
+            original.sessionId,
+            original.title,
+            HistoryMeta.render(original)
+        ).messages.single()
+
+        assertTrue(parsed.edited)
+        assertEquals(HistoryMeta.contentSha256("Generated answer"), parsed.originalContentSha256)
+        assertEquals("Changed in a Markdown editor", parsed.content)
+    }
 }
