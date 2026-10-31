@@ -55,6 +55,32 @@ class RequestMetadataSerializationTest {
     }
 
     @Test
+    fun invalidKnownMetadataIsRejectedBeforeSerialization() {
+        val provider = ProviderConfig("openai", "OpenAI", "https://api.openai.com/v1", "key")
+        try {
+            client.buildRequestBody(
+                provider, "gpt-4o", listOf(ChatMessage("user", "hello")), false, 0.7f,
+                requestMetadata = mapOf("temperature" to "\"too-hot\"")
+            )
+            org.junit.Assert.fail("Invalid temperature must not be serialized.")
+        } catch (expected: IllegalArgumentException) {
+            org.junit.Assert.assertTrue(expected.message.orEmpty().contains("temperature"))
+        }
+    }
+
+    @Test
+    fun unknownProviderExtensionIsPreservedInSerializedRequest() {
+        val provider = ProviderConfig("custom", "Custom", "https://example.invalid/v1", "key")
+        val body = Json.parseToJsonElement(
+            client.buildRequestBody(
+                provider, "model-x", listOf(ChatMessage("user", "hello")), false, 0.7f,
+                requestMetadata = mapOf("vendor_custom_mode" to """{"enabled":true}""")
+            )
+        ).jsonObject
+        assertEquals("""{"enabled":true}""", body["vendor_custom_mode"].toString())
+    }
+
+    @Test
     fun responsesControlsUseResponsesNativeFieldNames() {
         val provider = ProviderConfig(
             "openai", "OpenAI", "https://api.openai.com/v1", "key",
