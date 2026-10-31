@@ -76,7 +76,7 @@ Examples:
 | Ollama | `http://<host>:11434/v1` | Locally installed model |
 | LM Studio | `http://<host>:1234/v1` | Currently loaded model |
 
-The current generation adapter implements the OpenAI-compatible protocol, including its tool-call format. Native Anthropic and native Gemini adapters are not part of this milestone; those endpoints need an OpenAI-compatible shim to work here. Provider capabilities are exposed through an application-owned runtime interface so additional adapters can be added without changing the agent loop.
+The generation runtime currently supports the OpenAI-compatible chat-completions protocol, native Anthropic Messages, and native Gemini `generateContent`. The native Anthropic and Gemini adapters support normalized text and tool-call requests, but their text responses currently use a single completion rather than token-by-token streaming. OpenAI-compatible endpoints retain streaming. Provider capabilities are exposed through an application-owned runtime interface so the UI can distinguish these behaviors.
 
 ## Build
 
