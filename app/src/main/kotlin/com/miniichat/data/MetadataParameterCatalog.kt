@@ -61,6 +61,15 @@ object MetadataParameterCatalog {
         MetadataParameterDefinition("tool_choice", setOf(chat, responses), MetadataValueType.JSON, "Tool selection policy.", "\"auto\""),
         MetadataParameterDefinition("user", setOf(chat, responses), MetadataValueType.STRING, "Optional end-user identifier.", "\"user-123\""),
         MetadataParameterDefinition("metadata", setOf(responses), MetadataValueType.OBJECT, "Provider request metadata.", "{\"source\":\"FPilot\"}")
+        MetadataParameterDefinition("n", setOf(chat), MetadataValueType.INTEGER, "Number of chat completion choices where supported.", "1"),
+        MetadataParameterDefinition("logit_bias", setOf(chat), MetadataValueType.OBJECT, "Token ID to bias map.", "{\"50256\":-100}"),
+        MetadataParameterDefinition("stream_options", setOf(chat), MetadataValueType.OBJECT, "Streaming usage and response options.", "{\"include_usage\":true}"),
+        MetadataParameterDefinition("modalities", setOf(chat), MetadataValueType.ARRAY, "Requested output modalities.", "[\"text\",\"audio\"]"),
+        MetadataParameterDefinition("audio", setOf(chat), MetadataValueType.OBJECT, "Audio generation configuration.", "{\"voice\":\"alloy\",\"format\":\"wav\"}"),
+        MetadataParameterDefinition("prediction", setOf(chat), MetadataValueType.OBJECT, "Predicted output content for latency optimization.", "{\"type\":\"content\",\"content\":\"static text\"}"),
+        MetadataParameterDefinition("web_search_options", setOf(chat), MetadataValueType.OBJECT, "Provider-native web search configuration.", "{\"search_context_size\":\"medium\"}"),
+        MetadataParameterDefinition("prompt_cache_key", setOf(chat, responses), MetadataValueType.STRING, "Stable cache key where supported.", "\"conversation-123\""),
+        MetadataParameterDefinition("safety_identifier", setOf(chat, responses), MetadataValueType.STRING, "Stable end-user safety identifier where supported.", "\"user-123\""),
     )
 
     fun forProtocol(protocol: String): List<MetadataParameterDefinition> =
