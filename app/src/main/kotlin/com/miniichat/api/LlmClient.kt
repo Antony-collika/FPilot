@@ -272,14 +272,30 @@ class LlmClient {
         requestMetadata: Map<String, String>
     ): JsonObject {
         var resolved = JsonObject(emptyMap())
-        resolved = applyMetadataLayer(resolved, provider.extraBody)
-        resolved = applyMetadataLayer(resolved, globalMetadata)
-        resolved = applyMetadataLayer(resolved, provider.metadataParameters)
         val modelOverrides = provider.metadataParametersByModel[modelId]?.let { raw ->
             runCatching { json.parseToJsonElement(raw).jsonObject }.getOrElse {
                 throw IllegalArgumentException("Model-specific metadata for '$modelId' must be a valid JSON object.")
             }
         }
+        val layers = listOfNotNull(
+            provider.extraBody,
+            globalMetadata,
+            provider.metadataParameters,
+            modelOverrides?.mapValues { it.value.toString() },
+            requestMetadata
+        )
+        val validationErrors = layers.flatMap { layer ->
+            MetadataValidator.validate(layer, provider.apiProtocol)
+                .filter { it.level == com.miniichat.data.MetadataIssueLevel.ERROR }
+        }
+        if (validationErrors.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Invalid request metadata: " + validationErrors.joinToString("; ") { "${it.key}: ${it.message}" }
+            )
+        }
+        resolved = applyMetadataLayer(resolved, provider.extraBody)
+        resolved = applyMetadataLayer(resolved, globalMetadata)
+        resolved = applyMetadataLayer(resolved, provider.metadataParameters)
         if (modelOverrides != null) {
             resolved = applyMetadataLayer(resolved, modelOverrides.mapValues { it.value.toString() })
         }
