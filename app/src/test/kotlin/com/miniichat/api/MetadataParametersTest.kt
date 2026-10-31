@@ -1,0 +1,70 @@
+package com.miniichat.api
+
+import com.miniichat.data.ProviderApiProtocol
+import com.miniichat.data.ProviderConfig
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class MetadataParametersTest {
+    private val client = LlmClient()
+
+    @Test
+    fun chatCompletionsIncludesConfiguredMetadataAsJsonValues() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "test",
+            metadataParameters = mapOf(
+                "top_p" to "0.85",
+                "reasoning_effort" to "\"high\"",
+                "parallel_tool_calls" to "false"
+            )
+        )
+        val body = Json.parseToJsonElement(
+            client.buildRequestBody(provider, "model-x", listOf(ChatMessage("user", "hello")), false, 0.7f)
+        ).jsonObject
+
+        assertEquals("0.85", body["top_p"].toString())
+        assertEquals("\"high\"", body["reasoning_effort"].toString())
+        assertEquals("false", body["parallel_tool_calls"].toString())
+    }
+
+    @Test
+    fun responsesIncludesConfiguredNativeMetadataAndOmitsUnconfiguredFields() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "test",
+            apiProtocol = ProviderApiProtocol.RESPONSES,
+            metadataParameters = mapOf("max_output_tokens" to "2048", "reasoning" to "{\"effort\":\"high\"}")
+        )
+        val body = Json.parseToJsonElement(
+            client.buildResponsesRequestBody(provider, "model-x", listOf(ChatMessage("user", "hello")), false)
+        ).jsonObject
+
+        assertEquals("2048", body["max_output_tokens"].toString())
+        assertEquals("{\"effort\":\"high\"}", body["reasoning"].toString())
+        assertTrue("temperature" !in provider.metadataParameters)
+        assertTrue("top_p" !in provider.metadataParameters)
+    }
+
+    @Test
+    fun invalidJsonValueIsSafelySentAsString() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "Custom",
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "test",
+            metadataParameters = mapOf("vendor_option" to "custom-value")
+        )
+        val body = Json.parseToJsonElement(
+            client.buildRequestBody(provider, "model-x", listOf(ChatMessage("user", "hello")), false, 0.7f)
+        ).jsonObject
+        assertEquals("\"custom-value\"", body["vendor_option"].toString())
+    }
+}

@@ -255,6 +255,11 @@ class LlmClient {
                 })
                 put("tool_choice", "auto")
             }
+            // Metadata overrides are provider-scoped and only emitted when explicitly configured.
+            for ((k, v) in provider.metadataParameters) {
+                if (k.isBlank() || v.isBlank()) continue
+                put(k, coerceToJson(v))
+            }
             for ((k, v) in provider.extraBody) {
                 if (k.isBlank()) continue
                 put(k, coerceToJson(v))
@@ -348,6 +353,11 @@ class LlmClient {
                     })
                 })
                 put("tool_choice", "auto")
+            }
+            // Metadata overrides use the selected protocol's native JSON field names.
+            for ((key, value) in provider.metadataParameters) {
+                if (key.isBlank() || value.isBlank()) continue
+                put(key, coerceToJson(value))
             }
             for ((key, value) in provider.extraBody) {
                 if (key.isBlank()) continue

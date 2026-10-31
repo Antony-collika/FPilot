@@ -84,6 +84,11 @@ fun ProviderEditorScreen(
             initial?.extraBody?.map { it.key to it.value } ?: emptyList()
         )
     }
+    var metadataRows by remember(initial?.id) {
+        mutableStateOf<List<Pair<String, String>>>(
+            initial?.metadataParameters?.map { it.key to it.value } ?: emptyList()
+        )
+    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
             || (initial?.extraBody?.isNotEmpty() == true))
@@ -136,7 +141,9 @@ fun ProviderEditorScreen(
                         apiKey = apiKey.trim(),
                         customHeaders = headers,
                         extraBody = body,
-                        apiProtocol = apiProtocol
+                        apiProtocol = apiProtocol,
+                        metadataParameters = metadataRows.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim() }.filterValues { it.isNotBlank() }
                     )
                     onSave(p)
                 }
@@ -245,6 +252,17 @@ fun ProviderEditorScreen(
                     hint = stringResource(R.string.custom_headers_hint),
                     rows = headerRows,
                     onChange = { headerRows = it.toMutableList() }
+                )
+                KeyValueEditor(
+                    title = "API metadata parameters",
+                    hint = "Per-provider request fields. Enter JSON values (for example: 0.4, true, \"high\", or {\"effort\":\"high\"}). Leave a key empty to omit it. Unsupported fields may be rejected by the selected model.",
+                    rows = metadataRows,
+                    onChange = { metadataRows = it.toMutableList() }
+                )
+                Text(
+                    "Common fields: temperature, top_p, max_tokens, max_completion_tokens, max_output_tokens, seed, reasoning_effort, reasoning, thinking, response_format, stop, parallel_tool_calls, service_tier, store, truncation, verbosity. Exact support depends on provider, API protocol, and model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 KeyValueEditor(
                     title = stringResource(R.string.extra_body),

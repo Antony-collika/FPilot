@@ -17,6 +17,8 @@ data class ProviderConfig(
     val customHeaders: Map<String, String> = emptyMap(),
     val extraBody: Map<String, String> = emptyMap(),
     val apiProtocol: String = ProviderApiProtocol.CHAT_COMPLETIONS,
+    /** Per-provider API metadata overrides. Values are JSON literals; absent keys use provider defaults. */
+    val metadataParameters: Map<String, String> = emptyMap(),
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -33,8 +35,8 @@ object ProviderPresets {
             "Official OpenAI API"),
         Preset("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto",
             "Aggregator for OpenAI / Anthropic / Gemini / open-source"),
-        Preset("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat",
-            "DeepSeek-V3 / R1"),
+        Preset("DeepSeek", "https://api.deepseek.com/v1", "deepseek-v4-pro",
+            "DeepSeek V4"),
         Preset("Groq", "https://api.groq.com/openai/v1", "llama-3.1-70b-versatile",
             "Fast inference, free tier"),
         Preset("Mistral", "https://api.mistral.ai/v1", "mistral-small-latest",
