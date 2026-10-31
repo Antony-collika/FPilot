@@ -5,6 +5,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val releaseStoreFile = providers.gradleProperty("RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("RELEASE_STORE_FILE")).orNull
+val releaseStorePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("RELEASE_STORE_PASSWORD")).orNull
+val releaseKeyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("RELEASE_KEY_ALIAS")).orNull
+val releaseKeyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("RELEASE_KEY_PASSWORD")).orNull
+val hasReleaseSigning = listOf(
+    releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.miniichat"
     compileSdk = 34
@@ -20,15 +32,11 @@ android {
 
     signingConfigs {
         create("release") {
-            val ksFile = file("release.keystore")
-            if (ksFile.exists()) {
-                storeFile = ksFile
-                storePassword = (project.findProperty("RELEASE_STORE_PASSWORD") as String?)
-                    ?: System.getenv("RELEASE_STORE_PASSWORD") ?: "miniichat"
-                keyAlias = (project.findProperty("RELEASE_KEY_ALIAS") as String?)
-                    ?: System.getenv("RELEASE_KEY_ALIAS") ?: "miniichat"
-                keyPassword = (project.findProperty("RELEASE_KEY_PASSWORD") as String?)
-                    ?: System.getenv("RELEASE_KEY_PASSWORD") ?: "miniichat"
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
             }
         }
     }
@@ -51,7 +59,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = if (file("release.keystore").exists()) {
+            signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
