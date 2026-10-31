@@ -59,6 +59,35 @@ class MetadataValidatorTest {
     }
 
     @Test
+    fun responsesReasoningPathIsRegisteredForOpenAi() {
+        val provider = ProviderConfig(
+            id = "openai", name = "OpenAI", baseUrl = "https://api.openai.com/v1",
+            apiKey = "test", apiProtocol = ProviderApiProtocol.RESPONSES
+        )
+        val capability = ProviderCapabilityRegistry.capability(provider, "o3", "reasoning.effort")
+        assertEquals(CapabilityStatus.CONDITIONAL, capability.status)
+        assertTrue(capability.sourceUrl.orEmpty().contains("openai.com"))
+        assertTrue(
+            MetadataValidator.validate(
+                mapOf("reasoning.effort" to "\"high\""),
+                ProviderApiProtocol.RESPONSES
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun builtInProviderIdentitiesHaveProtocolDocumentation() {
+        ProviderPresets.all.filter { it.name != "Custom" }.forEach { preset ->
+            val provider = ProviderConfig(
+                id = preset.name, name = preset.name, baseUrl = preset.baseUrl, apiKey = "test",
+                providerType = ProviderKinds.fromPreset(preset.name)
+            )
+            val capability = ProviderCapabilityRegistry.capability(provider, preset.sampleModel, "temperature")
+            assertTrue("${preset.name} should have a documentation reference", capability.sourceUrl != null)
+        }
+    }
+
+    @Test
     fun allProviderPresetsResolveToKnownCapabilityIdentity() {
         val supportedKinds = ProviderKinds.choices.map { it.first }.toSet()
         ProviderPresets.all.forEach { preset ->
