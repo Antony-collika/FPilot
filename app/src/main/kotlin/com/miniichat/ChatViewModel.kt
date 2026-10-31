@@ -1305,6 +1305,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 )
             )
         }
+        if (documents.toolsFileUri != null && cards.none { it.role == CardRole.TOOLS }) {
+            val historyIndex = cards.indexOfFirst { it.role == CardRole.HISTORY }.takeIf { it >= 0 } ?: cards.size
+            cards.add(
+                historyIndex,
+                RequestCard(
+                    id = "workspace-tools",
+                    role = CardRole.TOOLS,
+                    title = "Workspace tools",
+                    source = "file",
+                    fileUri = documents.toolsFileUri,
+                    fileName = ".fpilot/tools/workspace.md"
+                )
+            )
+        }
         if (documents.memoryFileUri != null && cards.none { it.role == CardRole.MEMORY }) {
             val lastTurnIndex = cards.indexOfFirst { it.role == CardRole.LAST_TURN }.takeIf { it >= 0 } ?: cards.size
             cards.add(
