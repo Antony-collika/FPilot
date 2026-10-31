@@ -44,6 +44,16 @@ class MetadataValidatorTest {
     }
 
     @Test
+    fun ignoresEmptyEditorRows() {
+        assertTrue(
+            MetadataValidator.validate(
+                mapOf("temperature" to "", "" to "true"),
+                ProviderApiProtocol.CHAT_COMPLETIONS
+            ).isEmpty()
+        )
+    }
+
+    @Test
     fun explicitDisabledMarkerIsAccepted() {
         assertTrue(
             MetadataValidator.validate(
