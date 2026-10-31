@@ -62,7 +62,7 @@ class RequestMetadataAdapterTest {
 
         assertEquals("{\"effort\":\"high\"}", values["reasoning"])
         assertEquals("@omit", values["temperature"])
-        assertEquals("max_output_tokens", "max_output_tokens")
+        assertEquals("@omit", values["max_output_tokens"])
     }
 
     @Test

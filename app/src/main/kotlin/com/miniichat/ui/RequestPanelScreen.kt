@@ -306,9 +306,15 @@ private fun summaryOf(
     hasWorkspace: Boolean,
     historyTurnCount: Int
 ): String = when (card.role) {
-    CardRole.METADATA ->
-        "${settings.activeModel.ifBlank { "no model" }} · temperature ${"%.2f".format(settings.temperature)} · " +
-            "streaming ${if (settings.stream) "on" else "off"}"
+    CardRole.METADATA -> {
+        val active = buildList {
+            if (settings.temperatureEnabled) add("temperature ${"%.2f".format(settings.temperature)}")
+            if (settings.topPEnabled) add("top-p ${"%.2f".format(settings.topP)}")
+            if (settings.maxOutputTokensEnabled) add("${settings.maxOutputTokens} output tokens")
+            if (settings.reasoningEnabled) add("reasoning ${settings.reasoningEffort}")
+        }.joinToString(" · ").ifBlank { "provider defaults" }
+        "${settings.activeModel.ifBlank { "no model" }} · $active · streaming ${if (settings.stream) "on" else "off"}"
+    }
     CardRole.SYSTEM, CardRole.FREE -> {
         val rolePart = if (card.role == CardRole.FREE) "Role: ${card.roleLabel} · " else ""
         val body = if (card.source == "file") {
