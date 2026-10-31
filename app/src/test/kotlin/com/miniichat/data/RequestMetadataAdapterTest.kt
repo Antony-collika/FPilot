@@ -120,6 +120,18 @@ class RequestMetadataAdapterTest {
     }
 
     @Test
+    fun explicitlyUnsupportedCapabilityCannotBeForcedByGlobalOptIn() {
+        val provider = ProviderConfig(
+            id = "openai", name = "OpenAI", baseUrl = "https://api.openai.com/v1",
+            apiKey = "test", metadataCapabilityOverrides = mapOf("temperature" to "unsupported")
+        )
+        val settings = AppSettings(
+            temperature = 0.5f, temperatureEnabled = true, allowUnverifiedMetadata = true
+        )
+        assertTrue(RequestMetadataAdapter.parameters(provider, "gpt-4o", settings).isEmpty())
+    }
+
+    @Test
     fun providerIdentityCanBeExplicitForAnOpenAiCompatibleCustomDomain() {
         val provider = ProviderConfig(
             id = "proxy",
