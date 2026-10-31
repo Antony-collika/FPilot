@@ -1381,8 +1381,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val conversation = (storedConversation
                 ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
             val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
-            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
+            val provider = activeProvider()
+            val messages = makeRequestBuilder(workspaceRepository, current.activeModel, provider?.name.orEmpty())
                 .build(layout, conversation.messages + next)
+            val customTools = setup.exposed.orEmpty().map { it.definition }
+            val apiJson = provider?.let {
+                if (it.apiProtocol == com.miniichat.data.ProviderApiProtocol.RESPONSES) {
+                    client.buildResponsesRequestBody(it, current.activeModel, messages, current.stream, customTools)
+                } else {
+                    client.buildRequestBody(
+                        provider = it,
+                        modelId = current.activeModel,
+                        messages = messages,
+                        stream = current.stream,
+                        temperature = current.temperature,
+                        tools = customTools,
+                        conversationId = storedConversation?.id
+                    )
+                }
+            }
             buildString {
                 for (message in messages) {
                     append("[").append(message.role).append("]\n")
@@ -1406,6 +1423,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             if (current.toolEditFileEnabled) add("edit_file")
                         }.joinToString(", ")
                     )
+                }
+                if (apiJson != null) {
+                    append("\n\n--- Exact API JSON body (legacy built-in tools are listed above) ---\n")
+                    append(apiJson)
+                } else {
+                    append("\n\nNo active provider; API JSON is unavailable.")
                 }
             }
         } catch (e: Exception) {
