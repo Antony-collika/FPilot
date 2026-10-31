@@ -72,7 +72,11 @@ data class Message(
     /** Turn number (1, 2, 3...). Only set on user messages. Never reused. */
     @SerialName("turn_no") val turnNo: Int? = null,
     /** Tool rounds of the turn. Only set on the final assistant message of a turn. */
-    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList()
+    @SerialName("tool_rounds") val toolRounds: List<ToolRound> = emptyList(),
+    /** True when the visible Markdown text was changed after its original generation. */
+    val edited: Boolean = false,
+    /** SHA-256 of the first generated text, retained when the message is edited. */
+    @SerialName("original_content_sha256") val originalContentSha256: String? = null
 )
 
 @Serializable
