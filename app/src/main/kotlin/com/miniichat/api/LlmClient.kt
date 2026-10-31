@@ -1,6 +1,7 @@
 package com.miniichat.api
 
 import com.miniichat.data.AppSettings
+import com.miniichat.data.MetadataValidator
 import com.miniichat.data.ProviderConfig
 import com.miniichat.data.ProviderApiProtocol
 import com.miniichat.data.RequestMetadataAdapter
