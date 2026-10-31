@@ -29,7 +29,8 @@ class MetadataValidatorTest {
             ),
             ProviderApiProtocol.CHAT_COMPLETIONS
         )
-        assertEquals(3, issues.count { it.level == MetadataIssueLevel.ERROR })
+        assertEquals(2, issues.count { it.level == MetadataIssueLevel.ERROR })
+        assertEquals(MetadataIssueLevel.WARNING, issues.first { it.key == "messages" }.level)
     }
 
     @Test
