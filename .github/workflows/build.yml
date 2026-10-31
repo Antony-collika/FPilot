@@ -1,5 +1,9 @@
 name: Build APK
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main, agent-fs, request-control-panel, fix/provider-tool-call-compat, agent-fs-reliable-file-reading, build-c-history-md, build-d-history-sidecar, history-session-branch-regenerate, build-d-phase-7-file-access ]
