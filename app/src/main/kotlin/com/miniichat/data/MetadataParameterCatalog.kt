@@ -39,7 +39,7 @@ object MetadataParameterCatalog {
         MetadataParameterDefinition("random_seed", setOf(chat), MetadataValueType.INTEGER, "Mistral seed field.", "42"),
         MetadataParameterDefinition("reasoning_effort", setOf(chat), MetadataValueType.ENUM, "Provider-specific reasoning effort on Chat Completions.", "\"high\""),
         MetadataParameterDefinition("reasoning", setOf(chat, responses), MetadataValueType.OBJECT, "Native reasoning configuration. Fields vary by provider and protocol.", "{\"effort\":\"high\"}"),
-        MetadataParameterDefinition("reasoning.effort", setOf(responses), MetadataValueType.ENUM, "Responses API reasoning effort path.", "\"high\""),
+        MetadataParameterDefinition("reasoning.effort", setOf(chat, responses), MetadataValueType.ENUM, "Responses API reasoning effort path.", "\"high\""),
         MetadataParameterDefinition("thinking", setOf(chat), MetadataValueType.OBJECT, "Provider-specific thinking mode configuration.", "{\"type\":\"enabled\"}"),
         MetadataParameterDefinition("enable_thinking", setOf(chat), MetadataValueType.BOOLEAN, "SiliconFlow thinking mode toggle.", "true"),
         MetadataParameterDefinition("thinking_budget", setOf(chat), MetadataValueType.INTEGER, "Provider/model-specific thinking token budget.", "8192"),
