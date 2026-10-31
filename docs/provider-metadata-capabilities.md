@@ -33,6 +33,8 @@ A missing key inherits from the lower layer. `@omit` and `@disabled` explicitly 
 | LM Studio Responses | https://lmstudio.ai/docs/developer/openai-compat/responses |
 
 
+The protocol catalog includes sampling, token limits, reasoning, structured output, tool controls, log probabilities, streaming options, audio/modalities, prediction, caching, and provider-specific fields. The catalog is extensible: unknown keys are retained and flagged for manual verification rather than discarded.
+
 ## Validation and request inspection
 
 Provider metadata, global metadata, Extra Body values, model overrides, and active request controls are validated before serialization. Invalid JSON literals, malformed parameter paths, reserved transport keys, known value-type mismatches, and catalog fields assigned to the wrong protocol stop the request with a field-specific error. Unknown provider extensions are retained and surfaced as warnings; they are not silently discarded. The explicit `@omit` and `@disabled` markers are accepted, including when stored as JSON strings in a model override.
