@@ -67,6 +67,7 @@ fun ProviderEditorScreen(
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
     var baseUrl by remember(initial?.id) { mutableStateOf(initial?.baseUrl ?: "") }
     var apiKey by remember(initial?.id) { mutableStateOf(initial?.apiKey ?: "") }
+    var apiStyle by remember(initial?.id) { mutableStateOf(initial?.apiStyle ?: "openai_compatible") }
     var presetBaseUrl by remember(initial?.id) { mutableStateOf("") }
     var headerRows by remember(initial?.id) {
         mutableStateOf<List<Pair<String, String>>>(
@@ -129,7 +130,8 @@ fun ProviderEditorScreen(
                         baseUrl = normalizedUrl,
                         apiKey = apiKey.trim(),
                         customHeaders = headers,
-                        extraBody = body
+                        extraBody = body,
+                        apiStyle = apiStyle
                     )
                     onSave(p)
                 }
@@ -164,6 +166,29 @@ fun ProviderEditorScreen(
             }
             FieldSection(stringResource(R.string.setting_api_key)) {
                 EditableValue(apiKey, "", monospace = true) { apiKey = it }
+            }
+            FieldSection("API protocol") {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        "openai_compatible" to "OpenAI compatible",
+                        "anthropic" to "Anthropic",
+                        "gemini" to "Gemini"
+                    ).forEach { (value, label) ->
+                        TextButton(
+                            onClick = { apiStyle = value },
+                            enabled = apiStyle != value
+                        ) { Text(label) }
+                    }
+                }
+                Text(
+                    when (apiStyle) {
+                        "anthropic" -> "Uses the native Messages API and x-api-key authentication."
+                        "gemini" -> "Uses the native generateContent API with the API key in the query string."
+                        else -> "Uses the OpenAI-compatible chat completions API."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // Advanced — custom headers + extra body
@@ -229,6 +254,7 @@ fun ProviderEditorScreen(
                                 .clickable {
                                     if (name.isBlank()) name = preset.name
                                     presetBaseUrl = preset.baseUrl
+                                    apiStyle = preset.apiStyle
                                     presetSheetOpen = false
                                 }
                                 .padding(vertical = 8.dp, horizontal = 4.dp)
