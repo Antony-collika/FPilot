@@ -50,4 +50,4 @@ The registry covers the 11 built-in identities (OpenAI, OpenRouter, DeepSeek, Gr
 - `Unverified` means FPilot has no provider/protocol-specific rule; the user can still send the field through advanced metadata.
 - `Not applicable to this protocol` means the catalog field is associated with the other API protocol; it does not prevent sending a provider-specific field manually.
 
-The registry uses the documentation for the selected protocol where separate endpoint references exist. It is not a live capability probe. Recheck linked documentation and test the exact model before relying on an optional parameter in production.
+The registry uses the documentation for the selected protocol where separate endpoint references exist. It is not a live capability probe. Provider Editor also accepts explicit per-provider capability declarations keyed by native parameter name; valid values are `supported`, `conditional`, `unsupported`, and `unknown`, and these take precedence over built-in guidance. Recheck linked documentation and test the exact model before relying on an optional parameter in production.
