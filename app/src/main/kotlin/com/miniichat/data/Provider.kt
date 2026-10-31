@@ -11,6 +11,8 @@ data class ProviderConfig(
     val models: List<String> = emptyList(),
     val customHeaders: Map<String, String> = emptyMap(),
     val extraBody: Map<String, String> = emptyMap(),
+    /** openai_compatible (default), anthropic, or gemini. */
+    val apiStyle: String = "openai_compatible",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -19,7 +21,8 @@ object ProviderPresets {
         val name: String,
         val baseUrl: String,
         val sampleModel: String,
-        val hint: String
+        val hint: String,
+        val apiStyle: String = "openai_compatible"
     )
 
     val all: List<Preset> = listOf(
@@ -40,6 +43,16 @@ object ProviderPresets {
             "https://generativelanguage.googleapis.com/v1beta/openai",
             "gemini-1.5-flash",
             "Google Gemini via OpenAI-compatible endpoint"),
+        Preset("Anthropic (native)",
+            "https://api.anthropic.com/v1",
+            "",
+            "Native Anthropic Messages API",
+            "anthropic"),
+        Preset("Gemini (native)",
+            "https://generativelanguage.googleapis.com/v1beta",
+            "",
+            "Native Google Gemini API",
+            "gemini"),
         Preset("SiliconFlow",
             "https://api.siliconflow.cn/v1",
             "Qwen/Qwen2.5-7B-Instruct",
