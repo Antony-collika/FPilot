@@ -190,6 +190,14 @@ class LlmClient {
     private fun coerceToJson(v: String): JsonElement =
         runCatching { json.parseToJsonElement(v) }.getOrElse { JsonPrimitive(v) }
 
+    private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String): Map<String, String> {
+        val resolved = provider.metadataParameters.toMutableMap()
+        val modelOverrides = provider.metadataParametersByModel[modelId]
+            ?.let { raw -> runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() }
+        modelOverrides?.forEach { (key, value) -> resolved[key] = value.toString() }
+        return resolved
+    }
+
     internal fun buildRequestBody(
         provider: ProviderConfig,
         modelId: String,
@@ -256,8 +264,10 @@ class LlmClient {
                 put("tool_choice", "auto")
             }
             // Metadata overrides are provider-scoped and only emitted when explicitly configured.
-            for ((k, v) in provider.metadataParameters) {
-                if (k.isBlank() || v.isBlank()) continue
+            for ((k, v) in resolvedMetadataParameters(provider, modelId)) {
+                if (k.isBlank()) continue
+                if (v == "@omit") { remove(k); continue }
+                if (v.isBlank()) continue
                 put(k, coerceToJson(v))
             }
             for ((k, v) in provider.extraBody) {
@@ -355,8 +365,10 @@ class LlmClient {
                 put("tool_choice", "auto")
             }
             // Metadata overrides use the selected protocol's native JSON field names.
-            for ((key, value) in provider.metadataParameters) {
-                if (key.isBlank() || value.isBlank()) continue
+            for ((key, value) in resolvedMetadataParameters(provider, modelId)) {
+                if (key.isBlank()) continue
+                if (value == "@omit") { remove(key); continue }
+                if (value.isBlank()) continue
                 put(key, coerceToJson(value))
             }
             for ((key, value) in provider.extraBody) {

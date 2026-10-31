@@ -19,6 +19,8 @@ data class ProviderConfig(
     val apiProtocol: String = ProviderApiProtocol.CHAT_COMPLETIONS,
     /** Per-provider API metadata overrides. Values are JSON literals; absent keys use provider defaults. */
     val metadataParameters: Map<String, String> = emptyMap(),
+    /** JSON object overrides keyed by exact model ID; these override provider-level values. */
+    val metadataParametersByModel: Map<String, String> = emptyMap(),
     val createdAt: Long = System.currentTimeMillis()
 )
 
