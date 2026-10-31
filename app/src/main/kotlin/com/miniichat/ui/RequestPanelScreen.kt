@@ -85,7 +85,8 @@ fun RequestPanelScreen(
     onEditCard: (String) -> Unit,
     makePreview: suspend () -> String,
     onReset: () -> Unit,
-    onInitializeWorkspace: () -> Unit
+    onInitializeWorkspace: () -> Unit,
+    onOpenWorkspace: () -> Unit
 ) {
     var deletingId by remember { mutableStateOf<String?>(null) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -205,6 +206,7 @@ fun RequestPanelScreen(
             }
             TextButton(onClick = { scope.launch { previewText = makePreview() } }) { Text("Preview the next request") }
             if (hasWorkspace) {
+                TextButton(onClick = onOpenWorkspace) { Text("Browse and edit workspace") }
                 TextButton(onClick = { showInitializeWorkspace = true }) {
                     Text("Initialize Glassbox workspace documents")
                 }
