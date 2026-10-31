@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import java.io.IOException
 import java.nio.charset.Charset
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Small SAF adapter scoped to a user-selected tree URI.
@@ -243,7 +244,84 @@ class SafFileRepository(
         return chunk.content
     }
 
-    suspend fun writeText(path: String, content: String, mimeType: String = "text/markdown"): Uri {
+    /**
+     * Serializes writes made through this repository instance. SAF providers do not expose a
+     * portable compare-and-swap primitive, so callers must still treat this as optimistic
+     * conflict detection rather than a cross-process transaction.
+     */
+    private val mutationMutex = kotlinx.coroutines.sync.Mutex()
+
+    suspend fun writeText(path: String, content: String, mimeType: String = "text/markdown"): Uri =
+        mutationMutex.withLock {
+            writeTextUnlocked(path, content, mimeType)
+        }
+
+    /**
+     * Replace a file only when its current UTF-8 text still matches the snapshot that was read
+     * before the user approved the proposed change. A stale snapshot is never silently applied.
+     */
+    suspend fun writeTextIfUnchanged(
+        path: String,
+        expectedText: String,
+        content: String,
+        mimeType: String = "text/markdown"
+    ): Uri = mutationMutex.withLock {
+        val current = readText(path)
+        if (current != expectedText) {
+            throw IOException("Conflict: \"$path\" changed after it was read. No changes were applied.")
+        }
+        val target = writeTextUnlocked(path, content, mimeType)
+        val saved = readText(path)
+        if (saved != content) {
+            throw IOException("Verification failed after writing \"$path\". Inspect the file before retrying.")
+        }
+        target
+    }
+
+    /**
+     * Create a new document without ever opening an existing target in truncate mode.
+     * If verification fails, the newly created document is removed where the provider permits it.
+     */
+    suspend fun createTextIfAbsent(
+        path: String,
+        content: String,
+        mimeType: String = "text/markdown"
+    ): Uri = mutationMutex.withLock {
+        val normalized = normalizeRelativePath(path)
+        require(normalized.isNotBlank()) { "A file path is required." }
+        val segments = normalized.split('/')
+        var parent = rootDocumentUri()
+        for (segment in segments.dropLast(1)) {
+            val child = findChild(parent, segment)
+                ?: throw IOException("Parent directory does not exist: $segment")
+            require(isDirectory(child)) { "A parent path segment is not a directory: $segment" }
+            parent = child
+        }
+        val fileName = segments.last()
+        if (findChild(parent, fileName) != null) {
+            throw IOException("File already exists; refusing to overwrite it: $normalized")
+        }
+        val target = DocumentsContract.createDocument(
+            contentResolver,
+            parent,
+            mimeType,
+            fileName
+        ) ?: throw IOException("The document provider could not create the file.")
+        try {
+            writeToUri(target, content)
+            val saved = contentResolver.openInputStream(target)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: throw IOException("The document provider could not verify the created file.")
+            if (saved != content) {
+                throw IOException("Verification failed after creating \"$normalized\".")
+            }
+            target
+        } catch (error: Exception) {
+            runCatching { DocumentsContract.deleteDocument(contentResolver, target) }
+            throw error
+        }
+    }
+
+    private suspend fun writeTextUnlocked(path: String, content: String, mimeType: String): Uri {
         val normalized = normalizeRelativePath(path)
         require(normalized.isNotBlank()) { "A file path is required." }
         val segments = normalized.split('/')
@@ -268,11 +346,14 @@ class SafFileRepository(
                 fileName
             ) ?: throw IOException("The document provider could not create the file.")
         }
+        writeToUri(target, content)
+        return target
+    }
 
+    private fun writeToUri(target: Uri, content: String) {
         contentResolver.openOutputStream(target, "wt")?.bufferedWriter(Charsets.UTF_8)?.use {
             it.write(content)
         } ?: throw IOException("The document provider could not write this file.")
-        return target
     }
 
     suspend fun exists(path: String): Boolean = runCatching { resolve(path) }.isSuccess
