@@ -60,7 +60,7 @@ object MetadataParameterCatalog {
         MetadataParameterDefinition("top_logprobs", setOf(chat, responses), MetadataValueType.INTEGER, "Number of top log probabilities.", "5"),
         MetadataParameterDefinition("tool_choice", setOf(chat, responses), MetadataValueType.JSON, "Tool selection policy.", "\"auto\""),
         MetadataParameterDefinition("user", setOf(chat, responses), MetadataValueType.STRING, "Optional end-user identifier.", "\"user-123\""),
-        MetadataParameterDefinition("metadata", setOf(responses), MetadataValueType.OBJECT, "Provider request metadata.", "{\"source\":\"FPilot\"}")
+        MetadataParameterDefinition("metadata", setOf(responses), MetadataValueType.OBJECT, "Provider request metadata.", "{\"source\":\"FPilot\"}"),
         MetadataParameterDefinition("n", setOf(chat), MetadataValueType.INTEGER, "Number of chat completion choices where supported.", "1"),
         MetadataParameterDefinition("logit_bias", setOf(chat), MetadataValueType.OBJECT, "Token ID to bias map.", "{\"50256\":-100}"),
         MetadataParameterDefinition("stream_options", setOf(chat), MetadataValueType.OBJECT, "Streaming usage and response options.", "{\"include_usage\":true}"),
