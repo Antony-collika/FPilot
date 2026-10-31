@@ -1491,13 +1491,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if (currentText != original) {
                     throw IllegalStateException("Memory changed after the proposal was prepared. The newer file was left untouched.")
                 }
-                val output = resolver.openOutputStream(uri, "wt")
-                    ?: throw IllegalStateException("Could not write the Memory file.")
-                output.bufferedWriter(Charsets.UTF_8).use { it.write(updated) }
-                val saved = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: throw IllegalStateException("Could not verify the Memory file after writing.")
-                if (saved != updated) {
-                    throw IllegalStateException("Memory verification failed after writing. Review the file before retrying.")
+                try {
+                    val output = resolver.openOutputStream(uri, "wt")
+                        ?: throw IllegalStateException("Could not write the Memory file.")
+                    output.bufferedWriter(Charsets.UTF_8).use { it.write(updated) }
+                    val saved = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                        ?: throw IllegalStateException("Could not verify the Memory file after writing.")
+                    if (saved != updated) {
+                        throw IllegalStateException("Memory verification failed after writing.")
+                    }
+                } catch (writeError: Exception) {
+                    // Best-effort recovery is only attempted for the exact file that was approved.
+                    // Do not hide a partial write or claim success unless the original text is read back.
+                    val restored = runCatching {
+                        val backup = resolver.openOutputStream(uri, "wt")
+                            ?: throw IllegalStateException("Could not reopen the Memory file for recovery.")
+                        backup.bufferedWriter(Charsets.UTF_8).use { it.write(original) }
+                        val recovered = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                        recovered == original
+                    }.getOrDefault(false)
+                    val recoveryMessage = if (restored) {
+                        " The original Memory content was restored and verified."
+                    } else {
+                        " Recovery could not be verified. Inspect the Memory file before retrying."
+                    }
+                    throw IllegalStateException(
+                        (writeError.message ?: "Memory write failed.") + recoveryMessage,
+                        writeError
+                    )
                 }
             }
             _toast.value = "Memory updated"
