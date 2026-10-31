@@ -44,7 +44,7 @@ import com.miniichat.data.ProviderConfig
 import com.miniichat.data.SessionFiles
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, CardEdit, HistoryManager }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, RequestLogs, RequestPanel, CardEdit, HistoryManager, Workspace }
 
 /** Like the normal file chooser, but also asks for permission to write (needed by the Memory file). */
 private class OpenDocumentReadWrite : ActivityResultContracts.OpenDocument() {
@@ -410,7 +410,8 @@ fun AppRoot(vm: ChatViewModel) {
                     },
                     makePreview = { vm.previewRequest() },
                     onReset = { vm.resetLayout() },
-                    onInitializeWorkspace = { vm.initializeWorkspaceDocuments() }
+                    onInitializeWorkspace = { vm.initializeWorkspaceDocuments() },
+                    onOpenWorkspace = { screen = Screen.Workspace }
                 )
             }
             Screen.CardEdit -> {
@@ -460,6 +461,16 @@ fun AppRoot(vm: ChatViewModel) {
                         checkMemory = { vm.memoryReferenceWarning() }
                     )
                 }
+            }
+            Screen.Workspace -> {
+                WorkspaceBrowserScreen(
+                    onBack = { screen = Screen.RequestPanel },
+                    onList = { path, done -> vm.listWorkspaceEntries(path, done) },
+                    onRead = { path, done -> vm.readWorkspaceDocument(path, done) },
+                    onSave = { path, original, updated, done ->
+                        vm.saveWorkspaceDocument(path, original, updated, done)
+                    }
+                )
             }
             Screen.HistoryManager -> {
                 HistoryManagerScreen(
