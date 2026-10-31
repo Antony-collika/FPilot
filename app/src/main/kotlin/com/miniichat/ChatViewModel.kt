@@ -1504,11 +1504,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     // Best-effort recovery is only attempted for the exact file that was approved.
                     // Do not hide a partial write or claim success unless the original text is read back.
                     val restored = runCatching {
-                        val backup = resolver.openOutputStream(uri, "wt")
-                            ?: throw IllegalStateException("Could not reopen the Memory file for recovery.")
-                        backup.bufferedWriter(Charsets.UTF_8).use { it.write(original) }
-                        val recovered = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                        recovered == original
+                        val currentAfterFailure = resolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                            ?: throw IllegalStateException("Could not inspect the Memory file after the failed write.")
+                        when (currentAfterFailure) {
+                            original -> true
+                            updated -> {
+                                val backup = resolver.openOutputStream(uri, "wt")
+                                    ?: throw IllegalStateException("Could not reopen the Memory file for recovery.")
+                                backup.bufferedWriter(Charsets.UTF_8).use { it.write(original) }
+                                val recovered = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                                recovered == original
+                            }
+                            else -> false // A third version exists; leave the concurrent edit untouched.
+                        }
                     }.getOrDefault(false)
                     val recoveryMessage = if (restored) {
                         " The original Memory content was restored and verified."
