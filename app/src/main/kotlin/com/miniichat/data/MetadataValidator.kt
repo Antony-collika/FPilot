@@ -34,7 +34,7 @@ object MetadataValidator {
                 return@forEach
             }
             if (key.substringBefore(".") in reserved) {
-                add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "This key is reserved for the request structure and cannot be overridden."))
+                add(MetadataValidationIssue(key, MetadataIssueLevel.WARNING, "This key is reserved for the request structure and will be ignored."))
                 return@forEach
             }
             if (raw.trim() in setOf("@omit", "@disabled")) return@forEach
