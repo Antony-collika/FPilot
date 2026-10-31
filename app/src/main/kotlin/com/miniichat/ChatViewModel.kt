@@ -16,6 +16,7 @@ import com.miniichat.api.ToolDefinition
 import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.files.WorkspaceBootstrap
+import com.miniichat.files.WorkspaceDocumentLoader
 import com.miniichat.data.AppSettings
 import com.miniichat.data.Conversation
 import com.miniichat.data.DataStoreSessionRepository
@@ -733,8 +734,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            val layout = sessionFiles?.let { layoutWithSessionMemory(requestedLayout, it) } ?: requestedLayout
+            val baseLayout = sessionFiles?.let { layoutWithSessionMemory(requestedLayout, it) } ?: requestedLayout
             val workspaceRepository = workspaceRepositoryFor(current)
+            val layout = try {
+                layoutWithWorkspaceDocuments(baseLayout, workspaceRepository)
+            } catch (error: Exception) {
+                _error.value = "Could not load workspace documents: ${error.message ?: "unknown error"}"
+                return@launch
+            }
             val toolsSetup = try {
                 resolveTools(layout, workspaceRepository != null)
             } catch (e: Exception) {
@@ -1247,6 +1254,63 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             null
         }
 
+    /**
+     * Merge explicitly configured workspace documents into the existing request card layout.
+     * User-authored Request Control Panel cards remain in their relative order and take priority
+     * over automatic memory injection when a Memory card is already present.
+     */
+    private suspend fun layoutWithWorkspaceDocuments(
+        layout: RequestLayout,
+        workspace: SafFileRepository?
+    ): RequestLayout {
+        if (workspace == null) return layout
+        val documents = WorkspaceDocumentLoader(workspace).load()
+        val cards = layout.cards.toMutableList()
+        if (documents.systemFileUri != null && cards.none { it.id == "workspace-system" }) {
+            cards.add(
+                1.coerceAtMost(cards.size),
+                RequestCard(
+                    id = "workspace-system",
+                    role = CardRole.SYSTEM,
+                    title = "Workspace instructions",
+                    source = "file",
+                    fileUri = documents.systemFileUri,
+                    fileName = ".fpilot/system.md"
+                )
+            )
+        }
+        if (documents.skillCatalog != null && cards.none { it.id == "workspace-skills" }) {
+            val historyIndex = cards.indexOfFirst { it.role == CardRole.HISTORY }.takeIf { it >= 0 } ?: cards.size
+            cards.add(
+                historyIndex,
+                RequestCard(
+                    id = "workspace-skills",
+                    role = CardRole.SYSTEM,
+                    title = "Workspace skill catalog",
+                    source = "text",
+                    text = documents.skillCatalog,
+                    wrapTag = "WORKSPACE_SKILLS"
+                )
+            )
+        }
+        if (documents.memoryFileUri != null && cards.none { it.role == CardRole.MEMORY }) {
+            val lastTurnIndex = cards.indexOfFirst { it.role == CardRole.LAST_TURN }.takeIf { it >= 0 } ?: cards.size
+            cards.add(
+                lastTurnIndex,
+                RequestCard(
+                    id = "workspace-memory",
+                    role = CardRole.MEMORY,
+                    title = "Workspace memory",
+                    roleLabel = "user",
+                    source = "file",
+                    fileUri = documents.memoryFileUri,
+                    fileName = ".fpilot/memory.md"
+                )
+            )
+        }
+        return RequestLayout(cards)
+    }
+
     /** Reads the Tools card (if any) and decides which tools the model gets. */
     private suspend fun resolveTools(layout: RequestLayout, hasWorkspace: Boolean): ToolsSetup {
         val card = layout.cards.firstOrNull { it.role == CardRole.TOOLS }
@@ -1426,7 +1490,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val current = settings.value
         val storedConversation = store.snapshot().firstOrNull { it.id == activeId }
         val baseLayout = effectiveLayout()
-        val layout = if (
+        val sessionLayout = if (
             storedConversation != null &&
             !storedConversation.sessionId.isNullOrBlank() &&
             !storedConversation.sessionStorageUri.isNullOrBlank()
@@ -1444,6 +1508,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         val workspaceRepository = workspaceRepositoryFor(current)
         return try {
+            val layout = layoutWithWorkspaceDocuments(sessionLayout, workspaceRepository)
             val setup = resolveTools(layout, workspaceRepository != null)
             val conversation = (storedConversation
                 ?: Conversation(id = "preview", title = "", messages = emptyList())).withTurnNumbers()
