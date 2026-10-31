@@ -115,11 +115,16 @@ fun ProviderEditorScreen(
                 apiProtocol
             ))
             modelMetadataRows.filter { it.first.isNotBlank() }.forEach { (modelId, raw) ->
-                runCatching { MetadataParameterCatalog.parseOverrides(raw) }.onFailure {
+                val parsed = runCatching { MetadataParameterCatalog.parseOverrides(raw) }
+                if (parsed.isFailure) {
                     add(com.miniichat.data.MetadataValidationIssue(
                         modelId, MetadataIssueLevel.ERROR,
                         "Model override must be a valid JSON object."
                     ))
+                } else {
+                    addAll(MetadataValidator.validate(parsed.getOrThrow(), apiProtocol).map { issue ->
+                        issue.copy(key = "$modelId.${issue.key}")
+                    })
                 }
             }
         }
