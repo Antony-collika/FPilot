@@ -57,11 +57,11 @@ object ProviderCapabilityRegistry {
 
     private val documentedFields: Map<String, Map<String, Set<String>>> = mapOf(
         ProviderKinds.OPENAI to mapOf(
-            chat to setOf("temperature", "top_p", "max_completion_tokens", "reasoning_effort", "response_format", "seed", "stop", "parallel_tool_calls", "service_tier", "frequency_penalty", "presence_penalty", "logprobs", "top_logprobs", "tool_choice", "user"),
-            responses to setOf("temperature", "top_p", "max_output_tokens", "reasoning.effort", "text", "store", "truncation", "service_tier", "parallel_tool_calls", "tool_choice", "top_logprobs", "metadata", "user")
+            chat to setOf("temperature", "top_p", "max_completion_tokens", "reasoning_effort", "response_format", "seed", "stop", "parallel_tool_calls", "service_tier", "frequency_penalty", "presence_penalty", "logprobs", "top_logprobs", "tool_choice", "user", "n", "logit_bias", "stream_options", "modalities", "audio", "prediction", "safety_identifier"),
+            responses to setOf("temperature", "top_p", "max_output_tokens", "reasoning.effort", "text", "store", "truncation", "service_tier", "parallel_tool_calls", "tool_choice", "top_logprobs", "metadata", "user", "prompt_cache_key", "safety_identifier")
         ),
         ProviderKinds.OPENROUTER to mapOf(
-            chat to setOf("temperature", "top_p", "max_tokens", "max_completion_tokens", "reasoning", "response_format", "seed", "stop", "parallel_tool_calls", "frequency_penalty", "presence_penalty", "top_k", "min_p", "repetition_penalty", "tool_choice", "user")
+            chat to setOf("temperature", "top_p", "max_tokens", "max_completion_tokens", "reasoning", "response_format", "seed", "stop", "parallel_tool_calls", "frequency_penalty", "presence_penalty", "top_k", "min_p", "repetition_penalty", "tool_choice", "user", "n", "logit_bias", "stream_options")
         ),
         ProviderKinds.DEEPSEEK to mapOf(
             chat to setOf("temperature", "top_p", "max_tokens", "reasoning_effort", "thinking", "response_format", "stop", "tool_choice"),
