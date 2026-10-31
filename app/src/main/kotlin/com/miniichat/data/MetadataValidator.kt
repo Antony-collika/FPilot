@@ -29,6 +29,7 @@ object MetadataValidator {
         strictUnknownKeys: Boolean = false
     ): List<MetadataValidationIssue> = buildList {
         values.forEach { (key, raw) ->
+            if (key.isBlank() || raw.isBlank()) return@forEach
             if (!keyPattern.matches(key)) {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "Invalid parameter name. Use a JSON key or dotted object path."))
                 return@forEach
