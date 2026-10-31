@@ -70,6 +70,17 @@ class MetadataValidatorTest {
     }
 
     @Test
+    fun providerDeclaredCapabilityOverridesBuiltInRegistry() {
+        val provider = ProviderConfig(
+            id = "openai", name = "OpenAI", baseUrl = "https://api.openai.com/v1",
+            apiKey = "test", metadataCapabilityOverrides = mapOf("temperature" to "unsupported")
+        )
+        val capability = ProviderCapabilityRegistry.capability(provider, "gpt-4o", "temperature")
+        assertEquals(CapabilityStatus.UNSUPPORTED, capability.status)
+        assertTrue(capability.explanation.contains("explicitly declared"))
+    }
+
+    @Test
     fun responsesReasoningPathIsRegisteredForOpenAi() {
         val provider = ProviderConfig(
             id = "openai", name = "OpenAI", baseUrl = "https://api.openai.com/v1",
