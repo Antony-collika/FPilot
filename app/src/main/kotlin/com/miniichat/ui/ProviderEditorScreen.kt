@@ -96,11 +96,15 @@ fun ProviderEditorScreen(
     var modelMetadataRows by remember(initial?.id) {
         mutableStateOf<List<Pair<String, String>>>(initial?.metadataParametersByModel?.map { it.key to it.value } ?: emptyList())
     }
+    var capabilityRows by remember(initial?.id) {
+        mutableStateOf<List<Pair<String, String>>>(initial?.metadataCapabilityOverrides?.map { it.key to it.value } ?: emptyList())
+    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
             || (initial?.extraBody?.isNotEmpty() == true)
             || (initial?.metadataParameters?.isNotEmpty() == true)
             || (initial?.metadataParametersByModel?.isNotEmpty() == true)
+            || (initial?.metadataCapabilityOverrides?.isNotEmpty() == true)
 )
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
@@ -183,7 +187,9 @@ fun ProviderEditorScreen(
                         metadataParameters = metadataRows.filter { it.first.isNotBlank() }
                             .associate { it.first.trim() to it.second.trim() },
                         metadataParametersByModel = modelMetadataRows.filter { it.first.isNotBlank() }
-                            .associate { it.first.trim() to it.second.trim() }
+                            .associate { it.first.trim() to it.second.trim() },
+                        metadataCapabilityOverrides = capabilityRows.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second.trim().lowercase() }
                     )
                     onSave(p)
                 }
@@ -341,6 +347,12 @@ fun ProviderEditorScreen(
                     hint = "Key: exact model ID. Value: one JSON object. This overrides provider metadata; omitted keys inherit the provider layer. Use \"@disabled\" for an explicit removal.",
                     rows = modelMetadataRows,
                     onChange = { modelMetadataRows = it.toMutableList() }
+                )
+                KeyValueEditor(
+                    title = "Provider capability overrides",
+                    hint = "Key: native parameter name. Value: supported, conditional, unsupported, or unknown. These declarations override the built-in advisory registry for this provider.",
+                    rows = capabilityRows,
+                    onChange = { capabilityRows = it.toMutableList() }
                 )
                 metadataIssues.forEach { issue ->
                     Text(
