@@ -190,6 +190,9 @@ class LlmClient {
     private fun coerceToJson(v: String): JsonElement =
         runCatching { json.parseToJsonElement(v) }.getOrElse { JsonPrimitive(v) }
 
+    private fun isOmittedMetadataValue(value: String): Boolean =
+        value.isBlank() || value == "@omit" || value == "null" || value == "\"@omit\"" || value == "\""
+
     private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String): Map<String, String> {
         val resolved = provider.metadataParameters.toMutableMap()
         val modelOverrides = provider.metadataParametersByModel[modelId]?.let { raw ->
@@ -247,7 +250,7 @@ class LlmClient {
         val obj = buildJsonObject {
             put("model", modelId)
             put("stream", stream)
-            if (metadata["temperature"] != "@omit") put("temperature", temperature)
+            if (!isOmittedMetadataValue(metadata["temperature"].orEmpty())) put("temperature", temperature)
             put("messages", msgsJson)
             mistralPromptCacheKey(provider, conversationId)?.let {
                 put("prompt_cache_key", it)
@@ -269,7 +272,7 @@ class LlmClient {
             }
             // Metadata overrides are provider-scoped and only emitted when explicitly configured.
             for ((k, v) in metadata) {
-                if (k.isBlank() || v == "@omit") continue
+                if (k.isBlank() || isOmittedMetadataValue(v)) continue
                 if (v.isBlank()) continue
                 put(k, coerceToJson(v))
             }
@@ -370,7 +373,7 @@ class LlmClient {
             }
             // Metadata overrides use the selected protocol's native JSON field names.
             for ((key, value) in metadata) {
-                if (key.isBlank() || value == "@omit") continue
+                if (key.isBlank() || isOmittedMetadataValue(value)) continue
                 if (value.isBlank()) continue
                 put(key, coerceToJson(value))
             }

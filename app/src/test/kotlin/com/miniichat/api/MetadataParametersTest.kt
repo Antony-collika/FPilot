@@ -135,4 +135,19 @@ class MetadataParametersTest {
         assertTrue(error?.message?.contains("valid JSON object") == true)
     }
 
+    @Test
+    fun modelSpecificOmitSentinelSuppressesDefaultTemperature() {
+        val provider = ProviderConfig(
+            id = "test",
+            name = "OpenAI",
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "test",
+            metadataParametersByModel = mapOf("model-x" to """{"temperature":"@omit"}""")
+        )
+        val body = Json.parseToJsonElement(
+            client.buildRequestBody(provider, "model-x", listOf(ChatMessage("user", "hello")), false, 0.7f)
+        ).jsonObject
+        assertTrue("temperature" !in body)
+    }
+
 }
