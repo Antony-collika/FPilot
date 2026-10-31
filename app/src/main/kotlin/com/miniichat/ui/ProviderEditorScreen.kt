@@ -265,17 +265,6 @@ fun ProviderEditorScreen(
                 )
                 KeyValueEditor(
                     title = "API metadata parameters",
-                    hint = "Per-provider request fields. Enter JSON values (for example: 0.4, true, \"high\", or {\"effort\":\"high\"}). Leave a key empty to omit it. Unsupported fields may be rejected by the selected model.",
-                    rows = metadataRows,
-                    onChange = { metadataRows = it.toMutableList() }
-                )
-                Text(
-                    "Common fields: temperature, top_p, max_tokens, max_completion_tokens, max_output_tokens, seed, reasoning_effort, reasoning, thinking, response_format, stop, parallel_tool_calls, service_tier, store, truncation, verbosity. Exact support depends on provider, API protocol, and model.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                KeyValueEditor(
-                    title = "API metadata parameters",
                     hint = "Per-provider request fields. Enter JSON values such as 0.4, true, \"high\", or {\"effort\":\"high\"}. Leave a key empty to omit it. Unsupported fields may be rejected by the selected model.",
                     rows = metadataRows,
                     onChange = { metadataRows = it.toMutableList() }
