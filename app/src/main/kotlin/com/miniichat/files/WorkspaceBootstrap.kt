@@ -54,6 +54,10 @@ class WorkspaceBootstrap(
             ---
             schema_version: 1
             ---
+            include_system: true
+            include_memory: false
+            include_skills: true
+
             # FPilot workspace configuration
 
             This folder is a user-owned FPilot workspace. Documents in .fpilot are editable inputs,
