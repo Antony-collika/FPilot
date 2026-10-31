@@ -255,7 +255,12 @@ internal object NativeProviderProtocol {
             ?: throw IllegalStateException("Gemini returned no candidate.")
         val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray.orEmpty()
         val text = parts.mapNotNull { item ->
-            item.jsonObject["text"]?.jsonPrimitive?.contentOrNull
+            val part = item.jsonObject
+            if (part["thought"]?.jsonPrimitive?.contentOrNull == "true") {
+                null
+            } else {
+                part["text"]?.jsonPrimitive?.contentOrNull
+            }
         }.joinToString("")
         val calls = parts.mapNotNull { item ->
             val part = item.jsonObject
