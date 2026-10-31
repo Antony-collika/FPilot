@@ -36,6 +36,8 @@ import com.miniichat.data.HistoryFormatException
 import com.miniichat.data.HistoryMd
 import com.miniichat.data.RequestBuildException
 import com.miniichat.data.RequestBuilder
+import com.miniichat.data.RequestSnapshot
+import com.miniichat.data.RequestSnapshotMarkdown
 import com.miniichat.data.RequestCard
 import com.miniichat.data.ToolExposureSpec
 import com.miniichat.data.ToolsCardException
@@ -788,6 +790,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
             // The request is built from the cards of the Request Control Panel.
             val requestBuilder = makeRequestBuilder(workspaceRepository, model, provider.name)
+            val requestSnapshot: RequestSnapshot
+            val effectiveTools = effectiveToolDefinitions(current, workspaceRepository != null, toolsSetup)
             val historyForApi: MutableList<ChatMessage> = try {
                 val historyCard = layout.cards.first { it.role == CardRole.HISTORY }
                 val messagesForRequest = if (historyCard.historyCompact) {
@@ -795,10 +799,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     expandCompactToolResults(updated.messages, workspaceRepository, current, toolsSetup)
                 }
-                requestBuilder.build(layout, messagesForRequest).toMutableList()
+                requestSnapshot = requestBuilder.compile(layout, messagesForRequest)
+                requestSnapshot.messages.toMutableList()
             } catch (e: Exception) {
                 _error.value = e.message ?: "Could not build the request."
                 return@launch
+            }
+            if (workspaceRepository != null) {
+                runCatching {
+                    saveRequestSnapshotIfEnabled(workspaceRepository, requestSnapshot, effectiveTools)
+                }.onFailure { error ->
+                    _toast.value = "Request was built, but its snapshot could not be saved: ${error.message ?: "unknown error"}"
+                }
             }
             // Only now, when the request is valid, the new message is saved.
             store.upsert(updated)
@@ -1311,6 +1323,38 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return RequestLayout(cards)
     }
 
+    private fun effectiveToolDefinitions(
+        current: AppSettings,
+        hasWorkspace: Boolean,
+        setup: ToolsSetup
+    ): List<ToolDefinition> = when {
+        !hasWorkspace || setup.mode == "none" -> emptyList()
+        setup.mode == "custom" -> setup.exposed.orEmpty().map { it.definition }
+        else -> {
+            val enabled = buildSet {
+                if (current.toolListFilesEnabled) add("list_files")
+                if (current.toolSearchFilesEnabled) add("search_files")
+                if (current.toolSearchContentEnabled) add("search_content")
+                if (current.toolReadFileEnabled) add("read_file")
+                if (current.toolGetFileInfoEnabled) add("get_file_info")
+                if (current.toolCreateFileEnabled && current.allowWorkspaceCreate) add("create_file")
+                if (current.toolEditFileEnabled && current.allowWorkspaceEdit) add("edit_file")
+            }
+            MarkdownFileTools.allDefinitions().filter { it.name in enabled }
+        }
+    }
+
+    private suspend fun saveRequestSnapshotIfEnabled(
+        workspace: SafFileRepository,
+        snapshot: RequestSnapshot,
+        tools: List<ToolDefinition>
+    ) {
+        val documents = WorkspaceDocumentLoader(workspace).load()
+        if (!documents.saveRequestSnapshots) return
+        val path = ".fpilot/requests/${System.currentTimeMillis()}-${newId()}.md"
+        workspace.createTextIfAbsent(path, RequestSnapshotMarkdown.render(snapshot, tools))
+    }
+
     /** Reads the Tools card (if any) and decides which tools the model gets. */
     private suspend fun resolveTools(layout: RequestLayout, hasWorkspace: Boolean): ToolsSetup {
         val card = layout.cards.firstOrNull { it.role == CardRole.TOOLS }
@@ -1515,22 +1559,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val next = Message(id = "preview", role = "user", content = "(your next message)", turnNo = conversation.nextTurnNo)
             val snapshot = makeRequestBuilder(workspaceRepository, current.activeModel, activeProvider()?.name.orEmpty())
                 .compile(layout, conversation.messages + next)
-            val tools = when {
-                workspaceRepository == null || setup.mode == "none" -> emptyList()
-                setup.mode == "custom" -> setup.exposed.orEmpty().map { it.definition }
-                else -> {
-                    val enabled = buildSet {
-                        if (current.toolListFilesEnabled) add("list_files")
-                        if (current.toolSearchFilesEnabled) add("search_files")
-                        if (current.toolSearchContentEnabled) add("search_content")
-                        if (current.toolReadFileEnabled) add("read_file")
-                        if (current.toolGetFileInfoEnabled) add("get_file_info")
-                        if (current.toolCreateFileEnabled && current.allowWorkspaceCreate) add("create_file")
-                        if (current.toolEditFileEnabled && current.allowWorkspaceEdit) add("edit_file")
-                    }
-                    MarkdownFileTools.allDefinitions().filter { it.name in enabled }
-                }
-            }
+            val tools = effectiveToolDefinitions(current, workspaceRepository != null, setup)
             buildString {
                 appendLine("EFFECTIVE REQUEST SNAPSHOT")
                 appendLine("Fingerprint: ${snapshot.fingerprint}")
