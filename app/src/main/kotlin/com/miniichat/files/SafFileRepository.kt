@@ -330,6 +330,21 @@ class SafFileRepository(
             fileName
         ) ?: throw IOException("The document provider could not create the file.")
         try {
+            val actualName = contentResolver.query(
+                target,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            if (actualName != fileName) {
+                throw IOException(
+                    "The document provider created '$actualName' instead of '$fileName'. " +
+                        "The unexpected document will be removed; no existing file was changed."
+                )
+            }
             writeToUri(target, content)
             val saved = contentResolver.openInputStream(target)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                 ?: throw IOException("The document provider could not verify the created file.")
@@ -438,21 +453,5 @@ class SafFileRepository(
         return mime == DocumentsContract.Document.MIME_TYPE_DIR
     }
 
-    private fun normalizeRelativePath(path: String): String {
-        val normalizedSeparators = path.trim().replace('\\', '/')
-        require(!normalizedSeparators.startsWith('/')) {
-            "Absolute paths are not allowed."
-        }
-        val value = normalizedSeparators.trim('/')
-        if (value.isBlank()) return ""
-        val segments = value.split('/')
-        require(segments.none { it.isBlank() || it == "." || it == ".." }) {
-            "Path must stay inside the selected folder."
-        }
-        require(!value.startsWith('/') && !value.contains(':')) {
-            "Absolute paths and URI-like paths are not allowed."
-        }
-
-        return segments.joinToString("/")
-    }
+    private fun normalizeRelativePath(path: String): String = WorkspacePath.normalize(path)
 }
