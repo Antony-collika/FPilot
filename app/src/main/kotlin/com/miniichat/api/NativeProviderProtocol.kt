@@ -155,6 +155,7 @@ internal object NativeProviderProtocol {
                         addJsonObject {
                             putJsonObject("functionResponse") {
                                 put("name", name)
+                                message.toolCallId?.let { put("id", it) }
                                 putJsonObject("response") {
                                     put("content", message.content)
                                 }
@@ -245,7 +246,7 @@ internal object NativeProviderProtocol {
             val functionCall = part["functionCall"] as? JsonObject ?: return@mapNotNull null
             val args = functionCall["args"] as? JsonObject ?: JsonObject(emptyMap())
             val id = functionCall["id"]?.jsonPrimitive?.contentOrNull
-                ?: "gemini-${functionCall["name"]?.jsonPrimitive?.contentOrNull.orEmpty()}-${callsFingerprint(args)}"
+                ?: "gemini-${java.util.UUID.randomUUID()}"
             val thoughtSignature = part["thoughtSignature"]
             ToolCall(
                 id = id,
@@ -316,7 +317,4 @@ internal object NativeProviderProtocol {
             }
         }
     }
-
-    private fun callsFingerprint(args: JsonObject): String =
-        args.toString().hashCode().toUInt().toString(16)
 }
