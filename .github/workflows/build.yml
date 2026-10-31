@@ -27,6 +27,20 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: Generate ephemeral CI signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/app/ci-release.keystore" \
+            -storepass "fpilot-ci-only" \
+            -keypass "fpilot-ci-only" \
+            -alias "fpilot-ci" \
+            -dname "CN=FPilot CI,O=FPilot,C=US" \
+            -keyalg RSA -keysize 2048 -validity 2
+          echo "RELEASE_STORE_FILE=ci-release.keystore" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_PASSWORD=fpilot-ci-only" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=fpilot-ci" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=fpilot-ci-only" >> "$GITHUB_ENV"
+
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
