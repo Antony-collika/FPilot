@@ -1270,6 +1270,26 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * If the answer contains a memory patch block, applies it to the Memory file and returns
      * the answer without the block. If anything is wrong, the file is left untouched.
      */
+    private suspend fun confirmMemoryPatch(patch: String): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        approvalCompletion = deferred
+        _pendingToolApproval.value = ToolApprovalRequest(
+            toolName = "memory_update",
+            path = "memory.md",
+            summary = "Review this proposed change before it is written:\n\n" +
+                patch.take(4_000) +
+                if (patch.length > 4_000) "\n\n[Preview truncated. The full patch is not shown.]" else ""
+        )
+        return try {
+            deferred.await()
+        } finally {
+            if (approvalCompletion === deferred) {
+                approvalCompletion = null
+                _pendingToolApproval.value = null
+            }
+        }
+    }
+
     private suspend fun handleMemoryPatch(card: RequestCard?, answer: String): String {
         if (card == null) return answer
         val split = MemoryPatch.split(answer)
@@ -1279,15 +1299,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return split.visible
         }
         try {
-            withContext(Dispatchers.IO) {
-                val resolver = getApplication<Application>().contentResolver
-                val uri = android.net.Uri.parse(card.fileUri)
+            val resolver = getApplication<Application>().contentResolver
+            val uri = android.net.Uri.parse(card.fileUri)
+            val (original, updated) = withContext(Dispatchers.IO) {
                 val currentText = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                     ?: throw IllegalStateException("Could not open the Memory file.")
-                val updated = MemoryDoc.parse(currentText).applyPatch(patch).render()
+                currentText to MemoryDoc.parse(currentText).applyPatch(patch).render()
+            }
+            if (updated == original) return split.visible
+            if (!confirmMemoryPatch(patch)) {
+                _toast.value = "Memory update rejected; the file was not changed."
+                return split.visible
+            }
+            withContext(Dispatchers.IO) {
+                val currentText = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("Could not reopen the Memory file.")
+                if (currentText != original) {
+                    throw IllegalStateException("Memory changed after the proposal was prepared. The newer file was left untouched.")
+                }
                 val output = resolver.openOutputStream(uri, "wt")
                     ?: throw IllegalStateException("Could not write the Memory file.")
                 output.bufferedWriter(Charsets.UTF_8).use { it.write(updated) }
+                val saved = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("Could not verify the Memory file after writing.")
+                if (saved != updated) {
+                    throw IllegalStateException("Memory verification failed after writing. Review the file before retrying.")
+                }
             }
             _toast.value = "Memory updated"
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
