@@ -191,7 +191,7 @@ class LlmClient {
         runCatching { json.parseToJsonElement(v) }.getOrElse { JsonPrimitive(v) }
 
     private fun isOmittedMetadataValue(value: String): Boolean =
-        value.isBlank() || value == "@omit" || value == "null" || value == "\"@omit\"" || value == "\""
+        value.isBlank() || value == "@omit" || value == "null" || value == "\"@omit\"" || value == "\"\""
 
     private fun resolvedMetadataParameters(provider: ProviderConfig, modelId: String): Map<String, String> {
         val resolved = provider.metadataParameters.toMutableMap()
