@@ -37,7 +37,7 @@ object MetadataValidator {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "This key is reserved for the request structure and cannot be overridden."))
                 return@forEach
             }
-            if (raw == "@disabled") return@forEach
+            if (raw.trim() in setOf("@omit", "@disabled")) return@forEach
             val value = runCatching { json.parseToJsonElement(raw) }.getOrElse {
                 add(MetadataValidationIssue(key, MetadataIssueLevel.ERROR, "Value must be a valid JSON literal."))
                 return@forEach
