@@ -75,7 +75,6 @@ fun SettingsScreen(
     var settingsSubScreen by rememberSaveable { mutableStateOf("main") }
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
     var skills by rememberSaveable { mutableStateOf(settings.skillsText) }
-    var temperature by rememberSaveable { mutableStateOf(settings.temperature) }
     val stream = settings.stream
 
     BackHandler(enabled = settingsSubScreen != "main") { settingsSubScreen = "main" }
@@ -85,9 +84,6 @@ fun SettingsScreen(
     }
     androidx.compose.runtime.LaunchedEffect(settings.skillsText) {
         if (settings.skillsText != skills) skills = settings.skillsText
-    }
-    androidx.compose.runtime.LaunchedEffect(settings.temperature) {
-        if (settings.temperature != temperature) temperature = settings.temperature
     }
 
     Column(
@@ -283,20 +279,6 @@ fun SettingsScreen(
                 SectionHeader("Generation")
                 SectionCard {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        Text(
-                            "${stringResource(R.string.setting_temperature)}: ${"%.2f".format(temperature)}",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Slider(
-                            value = temperature,
-                            onValueChange = {
-                                temperature = it
-                                onChange { current -> current.copy(temperature = it) }
-                            },
-                            valueRange = 0f..2f,
-                            steps = 19
-                        )
-                        Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(stringResource(R.string.setting_stream), style = MaterialTheme.typography.bodyLarge)
@@ -396,7 +378,7 @@ fun SettingsScreen(
             SectionCard {
                 SettingsNavigationRow(
                     "Request Control Panel",
-                    "Cards sent to the model: system prompt, directory tree, history, temperature, streaming",
+                    "Cards sent to the model: system prompt, metadata, directory tree, history and tools",
                     Icons.Default.Storage
                 ) { onOpenRequestPanel() }
             }
