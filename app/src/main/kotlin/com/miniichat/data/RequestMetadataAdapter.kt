@@ -9,8 +9,11 @@ object RequestMetadataAdapter {
         setOf("temperature", "top_p", "max_output_tokens", "reasoning_effort")
 
     private fun maySend(provider: ProviderConfig, model: String, key: String, settings: AppSettings): Boolean {
-        val status = ProviderCapabilityRegistry.capability(provider, model, key).status
-        return status == CapabilityStatus.SUPPORTED || settings.allowUnverifiedMetadata
+        return when (ProviderCapabilityRegistry.capability(provider, model, key).status) {
+            CapabilityStatus.SUPPORTED -> true
+            CapabilityStatus.CONDITIONAL, CapabilityStatus.UNKNOWN -> settings.allowUnverifiedMetadata
+            CapabilityStatus.UNSUPPORTED -> false
+        }
     }
 
     private fun maxTokensKey(provider: ProviderConfig): String =
