@@ -1,6 +1,9 @@
 package com.miniichat.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -34,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -567,7 +571,9 @@ fun AppRoot(vm: ChatViewModel) {
             onDismissRequest = { vm.respondToToolApproval(false) },
             title = { Text(if (memoryChange) "Approve memory change" else "Confirm tool call") },
             text = {
-                androidx.compose.foundation.layout.Column {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                ) {
                     Text(
                         if (memoryChange) "The assistant proposes updating long-term memory:"
                         else "Agent wants to execute the ${request.toolName} tool with:"
