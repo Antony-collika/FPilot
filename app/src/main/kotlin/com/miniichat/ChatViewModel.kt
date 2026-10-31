@@ -8,7 +8,7 @@ import com.miniichat.api.LlmClient
 import com.miniichat.api.GenerationRequest
 import com.miniichat.api.GenerationEvent
 import com.miniichat.api.GenerationRuntime
-import com.miniichat.api.OpenAiCompatibleGenerationRuntime
+import com.miniichat.api.ProviderGenerationRuntime
 import com.miniichat.api.ToolCall
 import com.miniichat.agent.AgentLoop
 import com.miniichat.agent.ExposedTool
@@ -100,7 +100,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val settingsRepo = SettingsRepository(app)
     val providerStore = ProviderStore(app)
     private val client = LlmClient()
-    private val generationRuntime: GenerationRuntime = OpenAiCompatibleGenerationRuntime(client)
+    private val generationRuntime: GenerationRuntime = ProviderGenerationRuntime(client)
     val llmRequestLogs: StateFlow<String> = client.requestLogs
 
     fun clearLlmRequestLogs() = client.clearRequestLogs()
