@@ -1455,7 +1455,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _pendingToolApproval.value = ToolApprovalRequest(
             toolName = "memory_update",
             path = "memory.md",
-            summary = "Review the complete proposed Memory file diff before it is written:\\n" + diff
+            summary = "Review the complete proposed Memory file diff before it is written:\n" + diff
         )
         return try {
             deferred.await()
