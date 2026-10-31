@@ -17,6 +17,7 @@ import com.miniichat.files.MarkdownFileTools
 import com.miniichat.files.SafFileRepository
 import com.miniichat.files.WorkspaceBootstrap
 import com.miniichat.files.WorkspaceDocumentLoader
+import com.miniichat.files.ExactTextDiff
 import com.miniichat.data.AppSettings
 import com.miniichat.data.Conversation
 import com.miniichat.data.DataStoreSessionRepository
@@ -247,7 +248,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val path = value("path").ifBlank { value("query").ifBlank { "(no path)" } }
         val summary = when (uid) {
             "create_file" -> "Create a Markdown file (${value("content").length} characters). Preview:\n${preview("content")}"
-            "edit_file" -> "Replace one exact text occurrence. Target:\n${preview("target")}\nReplacement:\n${preview("replacement")}"
+            "edit_file" -> "Review the proposed exact-match change:\n" +
+                ExactTextDiff.render(value("target"), value("replacement"), maxOutputChars = 5_000)
             "read_file" -> "Read file content. Path: $path"
             "list_files" -> "List directory entries. Path: ${value("path").ifBlank { "(workspace root)" }}"
             "search_files", "search_content" -> "Search query: ${value("query")}\nStarting path: ${value("path").ifBlank { "(workspace root)" }}"
