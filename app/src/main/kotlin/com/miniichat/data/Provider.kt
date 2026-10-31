@@ -91,6 +91,8 @@ data class ProviderConfig(
     val metadataParameters: Map<String, String> = emptyMap(),
     /** JSON object overrides keyed by exact model ID; these override provider-level values. */
     val metadataParametersByModel: Map<String, String> = emptyMap(),
+    /** User-declared capability status by native parameter key. */
+    val metadataCapabilityOverrides: Map<String, String> = emptyMap(),
     val createdAt: Long = System.currentTimeMillis()
 )
 
