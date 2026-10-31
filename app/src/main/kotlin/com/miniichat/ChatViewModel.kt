@@ -1727,6 +1727,69 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun effectiveLayout(): RequestLayout =
         layoutStore.snapshot() ?: layoutFromSettings(settings.value)
 
+    fun listWorkspaceEntries(
+        relativePath: String,
+        onComplete: (Result<List<SafFileRepository.Entry>>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val repository = workspaceRepositoryFor(settings.value)
+                    ?: throw IllegalStateException("Choose a workspace folder first.")
+                val entries = withContext(Dispatchers.IO) { repository.list(relativePath) }
+                onComplete(Result.success(entries))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onComplete(Result.failure(error))
+            }
+        }
+    }
+
+    fun readWorkspaceDocument(
+        relativePath: String,
+        onComplete: (Result<String>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                require(relativePath.endsWith(".md", true) || relativePath.endsWith(".markdown", true)) {
+                    "Only Markdown documents can be opened in the workspace editor."
+                }
+                val repository = workspaceRepositoryFor(settings.value)
+                    ?: throw IllegalStateException("Choose a workspace folder first.")
+                val content = withContext(Dispatchers.IO) { repository.readText(relativePath) }
+                onComplete(Result.success(content))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onComplete(Result.failure(error))
+            }
+        }
+    }
+
+    fun saveWorkspaceDocument(
+        relativePath: String,
+        originalContent: String,
+        newContent: String,
+        onComplete: (Result<Unit>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                require(newContent.length <= 500_000) { "Document exceeds the 500,000 character editor limit." }
+                val repository = workspaceRepositoryFor(settings.value)
+                    ?: throw IllegalStateException("Choose a workspace folder first.")
+                withContext(Dispatchers.IO) {
+                    repository.writeTextIfUnchanged(relativePath, originalContent, newContent)
+                }
+                _toast.value = "Saved and verified $relativePath"
+                onComplete(Result.success(Unit))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onComplete(Result.failure(error))
+            }
+        }
+    }
+
     fun initializeWorkspaceDocuments() {
         viewModelScope.launch {
             val repository = workspaceRepositoryFor(settings.value)
