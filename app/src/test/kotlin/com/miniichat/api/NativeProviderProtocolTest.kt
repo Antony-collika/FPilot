@@ -157,4 +157,59 @@ class NativeProviderProtocolTest {
             )
         )
     }
+
+    @Test
+    fun forwardsCustomBodyParametersWithoutAllowingCoreRequestOverrides() {
+        val anthropic = json.parseToJsonElement(
+            NativeProviderProtocol.anthropicRequestBody(
+                "claude-example",
+                AppSettings(),
+                listOf(ChatMessage(role = "user", content = "Hi")),
+                emptyList(),
+                mapOf(
+                    "metadata" to """{"user_id":"workspace-user"}""",
+                    "max_tokens" to "1"
+                )
+            )
+        ).jsonObject
+        assertEquals(
+            "workspace-user",
+            anthropic["metadata"]!!.jsonObject["user_id"]!!.jsonPrimitive.content
+        )
+        assertEquals(8192, anthropic["max_tokens"]!!.jsonPrimitive.content.toInt())
+
+        val gemini = json.parseToJsonElement(
+            NativeProviderProtocol.geminiRequestBody(
+                AppSettings(),
+                listOf(ChatMessage(role = "user", content = "Hi")),
+                emptyList(),
+                mapOf(
+                    "safetySettings" to """[{"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_ONLY_HIGH"}]""",
+                    "contents" to "[]"
+                )
+            )
+        ).jsonObject
+        assertTrue(gemini["safetySettings"]!!.jsonArray.isNotEmpty())
+        assertTrue(gemini["contents"]!!.jsonArray.isNotEmpty())
+    }
+
+    @Test
+    fun excludesGeminiInternalThoughtTextFromVisibleAssistantContent() {
+        val parsed = NativeProviderProtocol.parseGeminiResponse(
+            """
+            {
+              "candidates": [{
+                "content": {
+                  "role": "model",
+                  "parts": [
+                    {"text":"internal reasoning","thought":true},
+                    {"text":"Visible answer","thought":false}
+                  ]
+                }
+              }]
+            }
+            """.trimIndent()
+        )
+        assertEquals("Visible answer", parsed.content)
+    }
 }
