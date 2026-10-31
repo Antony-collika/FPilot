@@ -371,7 +371,7 @@ class LlmClient {
         messages: List<ChatMessage>,
         tools: List<ToolDefinition>
     ): ChatMessage {
-        val bodyText = NativeProviderProtocol.anthropicRequestBody(modelId, settings, messages, tools)
+        val bodyText = NativeProviderProtocol.anthropicRequestBody(modelId, settings, messages, tools, provider.extraBody)
         recordRequestBody(bodyText)
         val responseText = client.preparePost("${provider.baseUrl.trimEnd('/')}/messages") {
             contentType(ContentType.Application.Json)
@@ -402,7 +402,7 @@ class LlmClient {
         messages: List<ChatMessage>,
         tools: List<ToolDefinition>
     ): ChatMessage {
-        val bodyText = NativeProviderProtocol.geminiRequestBody(settings, messages, tools)
+        val bodyText = NativeProviderProtocol.geminiRequestBody(settings, messages, tools, provider.extraBody)
         recordRequestBody(bodyText)
         val model = modelId.substringAfterLast('/')
         val key = java.net.URLEncoder.encode(provider.apiKey, "UTF-8")
