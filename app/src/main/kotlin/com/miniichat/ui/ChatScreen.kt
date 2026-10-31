@@ -515,11 +515,20 @@ private fun UserBubble(
                             )
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        Text(
-                            text = message.content,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                        Column {
+                            Text(
+                                text = message.content,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            if (message.edited) {
+                                Text(
+                                    "Edited",
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
                     }
                     androidx.compose.material3.DropdownMenu(
                         expanded = menuOpen,
@@ -660,11 +669,20 @@ private fun AssistantRow(
                             onLongClick = { if (message.content.isNotEmpty()) menuOpen = true }
                         )
                 ) {
-                    MarkdownText(
-                        text = message.content,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Column {
+                        MarkdownText(
+                            text = message.content,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (message.edited) {
+                            Text(
+                                "Edited",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
                 }
                 androidx.compose.material3.DropdownMenu(
                     expanded = menuOpen,
