@@ -95,11 +95,6 @@ fun ProviderEditorScreen(
             initial?.metadataParametersByModel?.map { it.key to it.value } ?: emptyList()
         )
     }
-    var metadataRows by remember(initial?.id) {
-        mutableStateOf<List<Pair<String, String>>>(
-            initial?.metadataParameters?.map { it.key to it.value } ?: emptyList()
-        )
-    }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
             || (initial?.extraBody?.isNotEmpty() == true)
