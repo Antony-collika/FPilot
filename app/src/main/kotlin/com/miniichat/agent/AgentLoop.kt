@@ -86,16 +86,36 @@ class AgentLoop(
                         toolCallId = call.id,
                         name = call.name
                     )
+                    onToolProgress(
+                        ToolProgress(
+                            call.name,
+                            call.id,
+                            rounds,
+                            index + 1,
+                            calls.size,
+                            ToolProgress.Phase.NOT_EXECUTED
+                        )
+                    )
                     cancelled
                 }
 
                 if (cancellation != null) {
-                    calls.drop(index + 1).forEach { remaining ->
+                    calls.drop(index + 1).forEachIndexed { remainingIndex, remaining ->
                         messages += ChatMessage(
                             role = "tool",
                             content = "Not executed because the user cancelled the preceding file-read request.",
                             toolCallId = remaining.id,
                             name = remaining.name
+                        )
+                        onToolProgress(
+                            ToolProgress(
+                                remaining.name,
+                                remaining.id,
+                                rounds,
+                                index + remainingIndex + 2,
+                                calls.size,
+                                ToolProgress.Phase.NOT_EXECUTED
+                            )
                         )
                     }
                     return finishAfterUserCancellation(
