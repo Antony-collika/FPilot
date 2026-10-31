@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.ProviderConfig
-import com.miniichat.data.MetadataParameterCatalog
 import com.miniichat.data.ProviderPresets
 import com.miniichat.util.BaseUrlNormalizer
 import com.miniichat.util.newId
@@ -92,8 +91,7 @@ fun ProviderEditorScreen(
     }
     var advancedOpen by remember(initial?.id) {
         mutableStateOf((initial?.customHeaders?.isNotEmpty() == true)
-            || (initial?.extraBody?.isNotEmpty() == true)
-            || (initial?.metadataParameters?.isNotEmpty() == true))
+            || (initial?.extraBody?.isNotEmpty() == true))
     }
     var presetSheetOpen by remember(initial?.id) { mutableStateOf(initial == null) }
 
@@ -262,7 +260,7 @@ fun ProviderEditorScreen(
                     onChange = { metadataRows = it.toMutableList() }
                 )
                 Text(
-                    "Common fields for this protocol: " + MetadataParameterCatalog.forProtocol(apiProtocol).joinToString { it.key } + ". Exact support still depends on provider and model.",
+                    "Common fields: temperature, top_p, max_tokens, max_completion_tokens, max_output_tokens, seed, reasoning_effort, reasoning, thinking, response_format, stop, parallel_tool_calls, service_tier, store, truncation, verbosity. Exact support depends on provider, API protocol, and model.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
