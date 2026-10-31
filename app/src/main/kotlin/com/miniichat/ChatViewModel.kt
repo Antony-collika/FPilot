@@ -44,6 +44,7 @@ import com.miniichat.data.ToolsCardException
 import com.miniichat.data.ToolsCardFormat
 import com.miniichat.data.displayName
 import com.miniichat.data.withContent
+import com.miniichat.data.withEditedContent
 import com.miniichat.data.RequestLayout
 import com.miniichat.data.RequestLayoutStore
 import com.miniichat.data.ToolRound
